@@ -130,6 +130,42 @@ test('regional proxy times out, caches a fresh result, and serves source-local s
   assert.equal(timeout.status, 504);
 });
 
+test('regional proxy bounds distinct-bbox upstream refreshes and releases capacity after settlement', async () => {
+  const releases = [];
+  let fetchCalls = 0;
+  const middleware = createRegionalProxy({
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return new Promise((resolve) => releases.push(() => resolve(regionalResponseJson(regionalTreePayload()))));
+    },
+  });
+  const urls = Array.from({ length: 5 }, (_, index) => (
+    `/api/regional/melbourne-trees?west=${144.9 + index / 100}&south=-37.9&east=${144.905 + index / 100}&north=-37.895`
+  ));
+  const active = urls.slice(0, 4).map((url) => invokeRegional(middleware, url));
+  let saturated;
+  let retry;
+  try {
+    saturated = invokeRegional(middleware, urls[4]);
+    assert.equal(fetchCalls, 4, 'the fifth distinct bbox must not start another upstream request');
+    const response = await saturated;
+    assert.equal(response.status, 503);
+    assert.deepEqual(JSON.parse(response.body), { error: 'regional source is temporarily unavailable' });
+    assert.equal(response.headers['x-regional-status'], 'saturated');
+
+    releases.shift()();
+    await active[0];
+    retry = invokeRegional(middleware, urls[4]);
+    assert.equal(fetchCalls, 5, 'settling a refresh releases one global slot');
+    releases.at(-1)();
+    releases.pop();
+    assert.equal((await retry).status, 200);
+  } finally {
+    for (const release of releases.splice(0)) release();
+    await Promise.allSettled([...active, saturated, retry].filter(Boolean));
+  }
+});
+
 test('regional proxy reports absent PTV server credentials without exposing them', async () => {
   const developerId = process.env.PTV_DEVELOPER_ID;
   const apiKey = process.env.PTV_API_KEY;
@@ -208,6 +244,7 @@ test('new data proxies install the same routes in dev and preview servers', () =
   const byName = new Map(config.plugins.map((plugin) => [plugin.name, plugin]));
   for (const name of [
     'rocket-launches-proxy',
+    'regional-source-proxy',
     'military-installations-proxy',
     'regional-brief-proxy',
     'weather-effects-proxy',

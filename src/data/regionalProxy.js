@@ -3,6 +3,9 @@ import { REGIONAL_SOURCES, normalizeRegionalFeatureCollection } from './regional
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_BOUNDS_WIDTH = 10;
+// A process-local cap limits all distinct source/bbox refreshes. Same-key
+// callers still coalesce, and an expired last-good entry can still be served.
+const MAX_CONCURRENT_UPSTREAM_REFRESHES = 4;
 const ALLOWED_QUERY_KEYS = new Set(['west', 'south', 'east', 'north']);
 
 // These are server-owned query templates. They are deliberately separate from
@@ -167,6 +170,7 @@ function unavailableError(error) {
 export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs } = {}) {
   const cache = new Map();
   const inFlight = new Map();
+  let activeRefreshes = 0;
 
   async function refresh(sourceId, source, bbox) {
     const transport = SOURCE_TRANSPORT[sourceId];
@@ -214,12 +218,20 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     }
     let pending = inFlight.get(key);
     if (!pending) {
+      if (activeRefreshes >= MAX_CONCURRENT_UPSTREAM_REFRESHES) {
+        if (existing) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
+        return sendJson(res, 503, { error: 'regional source is temporarily unavailable' }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'saturated' });
+      }
+      activeRefreshes += 1;
       pending = refresh(sourceId, source, bbox).then((body) => {
         cache.delete(key);
         cache.set(key, { body, cachedAt: now() });
         while (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
         return body;
-      }).finally(() => inFlight.delete(key));
+      }).finally(() => {
+        activeRefreshes -= 1;
+        inFlight.delete(key);
+      });
       inFlight.set(key, pending);
     }
     try {
