@@ -127,53 +127,65 @@ function feature(id, geometry, properties) {
   return { type: 'Feature', ...(id === undefined || id === null || id === '' ? {} : { id: String(id) }), geometry, properties };
 }
 
-function recordFeatures(sourceId, payload) {
+function collectFeatures(rows, maxFeatures, normalizeRow) {
+  const features = [];
+  for (const row of rows) {
+    const normalized = normalizeRow(row);
+    if (!normalized) continue;
+    features.push(normalized);
+    if (features.length >= maxFeatures) break;
+  }
+  return features;
+}
+
+function recordFeatures(sourceId, payload, maxFeatures) {
   if (!Array.isArray(payload?.results)) throw new Error(`${sourceId} payload must contain a results array`);
-  return payload.results.flatMap(({ record } = {}) => {
+  return collectFeatures(payload.results, maxFeatures, (row) => {
+    const { record } = row || {};
     const fields = record?.fields;
     const longitude = coordinate(fields?.longitude ?? fields?.lon, -180, 180);
     const latitude = coordinate(fields?.latitude ?? fields?.lat, -90, 90);
-    if (longitude === null || latitude === null) return [];
-    return [feature(record?.id ?? fields?.id, { type: 'Point', coordinates: [longitude, latitude] }, propertiesFor(fields,
-      fields?.common_name || fields?.name || fields?.title || fields?.asset_name))];
+    if (longitude === null || latitude === null) return null;
+    return feature(record?.id ?? fields?.id, { type: 'Point', coordinates: [longitude, latitude] }, propertiesFor(fields,
+      fields?.common_name || fields?.name || fields?.title || fields?.asset_name));
   });
 }
 
-function geoJsonFeatures(source, payload) {
+function geoJsonFeatures(source, payload, maxFeatures) {
   const rows = payload?.type === 'FeatureCollection' ? payload.features : payload?.features;
   if (!Array.isArray(rows)) throw new Error('GeoJSON payload must contain a features array');
-  return rows.flatMap((row) => {
+  return collectFeatures(rows, maxFeatures, (row) => {
     const geometry = normalizeGeometry(source, row?.geometry);
-    if (!geometry) return [];
+    if (!geometry) return null;
     const properties = row?.properties || {};
-    return [feature(row?.id ?? properties.id ?? properties.objectid, geometry, propertiesFor(properties,
-      properties.title || properties.name || properties.road_name || properties.label || properties.feature_name))];
+    return feature(row?.id ?? properties.id ?? properties.objectid, geometry, propertiesFor(properties,
+      properties.title || properties.name || properties.road_name || properties.label || properties.feature_name));
   });
 }
 
-function epaFeatures(payload) {
+function epaFeatures(payload, maxFeatures) {
   const rows = Array.isArray(payload?.data) ? payload.data : payload?.stations;
   if (!Array.isArray(rows)) throw new Error('vic-epa-air payload must contain a data or stations array');
-  return rows.flatMap((row) => {
+  return collectFeatures(rows, maxFeatures, (row) => {
     const longitude = coordinate(row?.longitude ?? row?.lon, -180, 180);
     const latitude = coordinate(row?.latitude ?? row?.lat, -90, 90);
-    if (longitude === null || latitude === null) return [];
+    if (longitude === null || latitude === null) return null;
     const name = cleanText(row?.stationName || row?.station_name || row?.name, 180) || 'EPA monitoring station';
     const aqi = Number.isFinite(Number(row?.aqi ?? row?.airQualityIndex)) ? Number(row.aqi ?? row.airQualityIndex) : null;
-    return [feature(row?.stationId ?? row?.station_id ?? row?.id, { type: 'Point', coordinates: [longitude, latitude] },
-      propertiesFor({ ...row, aqi }, aqi === null ? name : `${name} - AQI ${aqi}`))];
+    return feature(row?.stationId ?? row?.station_id ?? row?.id, { type: 'Point', coordinates: [longitude, latitude] },
+      propertiesFor({ ...row, aqi }, aqi === null ? name : `${name} - AQI ${aqi}`));
   });
 }
 
-function ptvFeatures(payload) {
+function ptvFeatures(payload, maxFeatures) {
   if (!Array.isArray(payload?.stops)) throw new Error('ptv-transit payload must contain a stops array');
-  return payload.stops.flatMap((stop) => {
+  return collectFeatures(payload.stops, maxFeatures, (stop) => {
     const longitude = coordinate(stop?.stop_longitude ?? stop?.longitude, -180, 180);
     const latitude = coordinate(stop?.stop_latitude ?? stop?.latitude, -90, 90);
-    if (longitude === null || latitude === null) return [];
-    return [feature(stop?.stop_id ?? stop?.id, { type: 'Point', coordinates: [longitude, latitude] }, propertiesFor({
+    if (longitude === null || latitude === null) return null;
+    return feature(stop?.stop_id ?? stop?.id, { type: 'Point', coordinates: [longitude, latitude] }, propertiesFor({
       category: stop?.route_type, type: stop?.stop_type,
-    }, stop?.stop_name || stop?.name || 'PTV stop'))];
+    }, stop?.stop_name || stop?.name || 'PTV stop'));
   });
 }
 
@@ -182,11 +194,11 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   const source = sourceFor(sourceId);
   if (!source.runtimeEligible) throw new Error(`${sourceId} is not runtime eligible: restricted source terms`);
   let features;
-  if (['melbourne-trees', 'melbourne-places'].includes(sourceId)) features = recordFeatures(sourceId, payload);
-  else if (sourceId === 'vic-epa-air') features = epaFeatures(payload);
-  else if (sourceId === 'ptv-transit') features = ptvFeatures(payload);
-  else features = geoJsonFeatures(source, payload);
-  return { type: 'FeatureCollection', features: features.slice(0, source.maxFeatures) };
+  if (['melbourne-trees', 'melbourne-places'].includes(sourceId)) features = recordFeatures(sourceId, payload, source.maxFeatures);
+  else if (sourceId === 'vic-epa-air') features = epaFeatures(payload, source.maxFeatures);
+  else if (sourceId === 'ptv-transit') features = ptvFeatures(payload, source.maxFeatures);
+  else features = geoJsonFeatures(source, payload, source.maxFeatures);
+  return { type: 'FeatureCollection', features };
 }
 
 /** Return the source's required display attribution, or reject an unknown source. */

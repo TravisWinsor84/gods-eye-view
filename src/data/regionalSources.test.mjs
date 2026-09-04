@@ -148,6 +148,20 @@ test('source-aware maxima cap valid normalized features at each source contract 
   assert.equal(result.features.at(-1).id, `place-${source.maxFeatures - 1}`);
 });
 
+test('normalization stops before reading rows after a source feature cap', () => {
+  const source = REGIONAL_SOURCES['melbourne-places'];
+  const results = Array.from({ length: source.maxFeatures }, (_, index) => ({ record: { id: `place-${index}`, fields: {
+    name: `Place ${index}`, latitude: -37.8, longitude: 144.9,
+  } } }));
+  results.push({
+    get record() {
+      throw new Error('rows after the feature cap must not be normalized');
+    },
+  });
+  const result = normalizeRegionalFeatureCollection('melbourne-places', { results });
+  assert.equal(result.features.length, source.maxFeatures);
+});
+
 test('attribution is exact, source-scoped, and rejects unknown IDs', () => {
   assert.equal(regionalSourceAttribution('melbourne-trees'), 'City of Melbourne Open Data');
   assert.equal(regionalSourceAttribution('vic-epa-air'), 'EPA Victoria');
