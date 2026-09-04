@@ -74,6 +74,7 @@ import {
   terrainPointKey,
   validTerrainResult,
 } from './src/data/terrainHeightsProxy.js';
+import { createRegionalProxy } from './src/data/regionalProxy.js';
 import { VOICE_MODELS, isKnownVoiceTier, resolveVoiceModel } from './src/voice/voiceCost.js';
 
 /** Resolve __dirname for ESM context. */
@@ -7401,6 +7402,18 @@ function weatherEffectsProxy() {
   };
 }
 
+/** Fixed-route public regional-data proxy. Server credentials, if ever added,
+ * remain in process.env and are never defined for the browser bundle. */
+function regionalSourceProxy() {
+  const middleware = createRegionalProxy();
+  const install = (server) => server.middlewares.use('/api/regional', middleware);
+  return {
+    name: 'regional-source-proxy',
+    configureServer: install,
+    configurePreviewServer: install,
+  };
+}
+
 function parseJsonEnv(key, fallback) {
   const value = process.env[key];
   if (!value) return fallback;
@@ -7739,6 +7752,7 @@ export default defineConfig(({ mode }) => {
       adsbdbProxy(),
       overpassProxy(),
       militaryInstallationsProxy(),
+      regionalSourceProxy(),
       regionalBriefProxy(),
       weatherEffectsProxy(),
       cctvProxy(),
