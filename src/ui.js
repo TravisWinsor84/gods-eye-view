@@ -14,6 +14,7 @@ import {
 } from './bloom.js';
 import { LOCATIONS, CITY_POIS, GLOBE_VIEW, flyToGlobeView, flyToPresetLocation, flyToPOI, searchAndFlyTo } from './locations.js';
 import { locationMiniStatus } from './locationStatus.js';
+import { buildMapContextFromUiState, renderMapContext } from './mapContextDom.js';
 import { interruptCameraMotion } from './cameraVerbs.js';
 import {
   aircraftTrackingTarget,
@@ -2150,6 +2151,7 @@ export class StyleManager {
     this._clearSelectedLayersManagerPromise = null;
     this._clearSelectedLayersHandler = null;
     this._dataManager = null;
+    this._mapContextMoveEndRemove = null;
     this._cctvUnsubscribe = null;
     this._radioUnsubscribe = null;
     this._radioState = null;
@@ -2374,6 +2376,7 @@ export class StyleManager {
     this._styleMiniValue = document.getElementById('style-mini-value');
     this._locationMiniCity = document.getElementById('location-mini-city');
     this._locationMiniPoi = document.getElementById('location-mini-poi');
+    this._mapContextCard = document.getElementById('map-context-card');
     this._safeFrameOverlay = document.getElementById('safe-frame-overlay');
     this._safeFrameBox = document.getElementById('safe-frame-box');
     this._activeLocationId = null;
@@ -2624,6 +2627,7 @@ export class StyleManager {
     this._initCctvPanel();
     this._initGlobalContextPanel();
     this._initLocationBar();
+    this._initMapContext();
     this._initShareButton();
     this._initClearSelectedLayersButton();
     this._initResetGlobeButton();
@@ -4365,9 +4369,11 @@ export class StyleManager {
         }
         this._loadingFeedbackEvent = change;
         this._updateGlobalLoadingFeedback(performance.now());
+        this._updateMapContext();
       });
     }
     this._updateGlobalLoadingFeedback(performance.now());
+    this._updateMapContext();
     if (typeof this._dataManager?.subscribeVisibilityRequests === 'function') {
       this._dataManagerVisibilityRequestUnsubscribe = this._dataManager.subscribeVisibilityRequests((change) => {
         if (shouldCaptureContextSession(change)) {
@@ -9542,19 +9548,59 @@ export class StyleManager {
   }
 
   /**
+   * Render once at startup, then only after a settled camera move. Location and
+   * layer changes call _updateMapContext directly through their existing paths.
+   * @returns {void}
+   */
+  _initMapContext() {
+    this._mapContextMoveEndRemove?.();
+    this._mapContextMoveEndRemove = null;
+    if (typeof this.viewer?.camera?.moveEnd?.addEventListener === 'function') {
+      this._mapContextMoveEndRemove = this.viewer.camera.moveEnd.addEventListener(() => {
+        this._updateMapContext();
+      });
+    }
+    this._updateMapContext();
+  }
+
+  /**
+   * Project current local UI state through the pure map-context model.
+   * Regional provenance remains empty until a validated status source exists.
+   * @returns {void}
+   */
+  _updateMapContext() {
+    if (!this._mapContextCard) return;
+    const headingRadians = this.viewer?.camera?.heading;
+    const cameraHeading = Number.isFinite(headingRadians)
+      ? Cesium.Math.toDegrees(headingRadians)
+      : null;
+    const context = buildMapContextFromUiState({
+      city: this._activeLocationId ? CITY_POIS[this._activeLocationId] : null,
+      currentPoi: this._currentPoi,
+      searchedLabel: this._searchedLocationLabel,
+      cameraHeading,
+      enabledLayers: this._dataManager?.getEnabledLayerIds?.() || [],
+      sources: [],
+    });
+    renderMapContext(this._mapContextCard, context);
+  }
+
+  /**
    * Updates the collapsed mini-status readout with the current destination:
    * a preset city + POI/landmark, or the last free-text geocode search.
    * @returns {void}
    */
   _updateLocationMiniStatus() {
-    if (!this._locationMiniCity || !this._locationMiniPoi) return;
-    const lines = locationMiniStatus({
-      city: this._activeLocationId ? CITY_POIS[this._activeLocationId] : null,
-      currentPoi: this._currentPoi,
-      searchedLabel: this._searchedLocationLabel,
-    });
-    this._locationMiniCity.textContent = lines.city;
-    this._locationMiniPoi.textContent = lines.poi;
+    if (this._locationMiniCity && this._locationMiniPoi) {
+      const lines = locationMiniStatus({
+        city: this._activeLocationId ? CITY_POIS[this._activeLocationId] : null,
+        currentPoi: this._currentPoi,
+        searchedLabel: this._searchedLocationLabel,
+      });
+      this._locationMiniCity.textContent = lines.city;
+      this._locationMiniPoi.textContent = lines.poi;
+    }
+    this._updateMapContext();
   }
 
   /**
@@ -10202,6 +10248,8 @@ export class StyleManager {
     this._dataManagerVisibilityRequestUnsubscribe = null;
     this._dataManagerUnsubscribe?.();
     this._dataManagerUnsubscribe = null;
+    this._mapContextMoveEndRemove?.();
+    this._mapContextMoveEndRemove = null;
     if (this._globeResetHandler) {
       this._resetGlobeBtn?.removeEventListener('click', this._globeResetHandler);
       this._cockpitResetGlobeBtn?.removeEventListener('click', this._globeResetHandler);

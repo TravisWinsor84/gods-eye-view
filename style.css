@@ -9517,3 +9517,183 @@ body.scene-playback-mode #key-setup {
   border-color: rgba(255, 170, 150, 0.65);
   outline: none;
 }
+
+/* ── Map context instrument ──────────────────── */
+#map-context-card {
+  position: fixed;
+  bottom: 3rem;
+  left: 1.5rem;
+  z-index: 144;
+  width: min(21rem, calc(100vw - 3rem));
+  padding: 0.72rem 0.78rem 0.68rem;
+  color: var(--text-primary);
+  background: rgba(12, 12, 20, 0.82);
+  border: 1px solid rgba(232, 234, 237, 0.16);
+  border-left-color: rgba(0, 212, 255, 0.56);
+  border-radius: 0.35rem;
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+}
+
+.map-context-bearing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.8rem;
+}
+
+.map-context-bearing strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.map-context-bearing output {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-context-rule {
+  position: relative;
+  height: 0.42rem;
+  margin-top: 0.1rem;
+  border-top: 1px solid rgba(0, 212, 255, 0.62);
+}
+
+.map-context-rule::before {
+  content: '';
+  position: absolute;
+  top: -0.22rem;
+  right: 2.7rem;
+  width: 1px;
+  height: 0.42rem;
+  background: rgba(0, 212, 255, 0.78);
+}
+
+.map-context-hierarchy {
+  color: rgba(232, 234, 237, 0.76);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.map-context-summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 0.35rem;
+}
+
+.map-context-summary-row > span,
+.map-context-details {
+  color: rgba(232, 234, 237, 0.68);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1.45;
+}
+
+.map-context-summary-row button {
+  min-width: 3.6rem;
+  min-height: 1.5rem;
+  padding: 0.18rem 0.42rem;
+  color: #bdefff;
+  font: 500 0.62rem/1 var(--font-sans);
+  background: transparent;
+  border: 1px solid rgba(0, 212, 255, 0.38);
+  border-radius: 0.22rem;
+  cursor: pointer;
+}
+
+.map-context-summary-row button:hover {
+  color: var(--text-primary);
+  border-color: rgba(0, 212, 255, 0.72);
+}
+
+.map-context-summary-row button:focus-visible,
+.map-context-details a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.map-context-details {
+  max-height: min(15rem, 36vh);
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  overflow: auto;
+  border-top: 1px solid rgba(232, 234, 237, 0.14);
+}
+
+.map-context-details p + p,
+.map-context-details a {
+  margin-top: 0.36rem;
+}
+
+.map-context-details [data-map-context-explanation] {
+  color: rgba(232, 234, 237, 0.9);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.map-context-details a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  color: #63dff7;
+  text-underline-offset: 0.18rem;
+}
+
+.map-context-details [data-map-context-link][hidden] {
+  display: none;
+}
+
+#map-context-card.is-stale,
+#map-context-card.is-unavailable {
+  border-left-color: #d5a863;
+}
+
+#map-context-card.is-stale [data-map-context-summary],
+#map-context-card.is-stale [data-map-context-source],
+#map-context-card.is-unavailable [data-map-context-summary],
+#map-context-card.is-unavailable [data-map-context-source] {
+  color: #e4c58f;
+}
+
+@media (max-width: 720px) {
+  #map-context-card {
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: calc(7.75rem + env(safe-area-inset-bottom));
+    left: max(0.75rem, env(safe-area-inset-left));
+    width: auto;
+    padding: 0.62rem 0.68rem 0.58rem;
+  }
+
+  .map-context-bearing strong { font-size: 0.84rem; }
+  .map-context-details { max-height: 30vh; }
+
+  body:has(#command-dock #location-bar:not(.collapsed)) #map-context-card,
+  body:has(#command-dock #control-panel:not(.collapsed)) #map-context-card {
+    top: 11.75rem;
+    bottom: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #map-context-card,
+  #map-context-card * {
+    scroll-behavior: auto;
+    transition: none;
+  }
+}
