@@ -28,6 +28,22 @@ test('buildMapContext falls back to readable coordinates for an unresolved locat
   assert.equal(context.coordinates, '-37.8136, 144.9631');
 });
 
+test('buildMapContext rejects non-finite and out-of-range coordinates as unresolved', () => {
+  for (const location of [
+    { latitude: Number.NaN, longitude: 144.9631 },
+    { latitude: -37.8136, longitude: Number.POSITIVE_INFINITY },
+    { latitude: 90.0001, longitude: 144.9631 },
+    { latitude: -90.0001, longitude: 144.9631 },
+    { latitude: -37.8136, longitude: 180.0001 },
+    { latitude: -37.8136, longitude: -180.0001 },
+  ]) {
+    const context = buildMapContext({ location });
+    assert.equal(context.title, 'Location not resolved');
+    assert.equal(context.hierarchy, 'Location not resolved');
+    assert.equal(context.coordinates, null);
+  }
+});
+
 test('clampContextLabel normalizes whitespace and bounds a very long label while preserving it accessibly', () => {
   const fullLabel = '   Central    Melbourne   '.repeat(20);
   const label = clampContextLabel(fullLabel);
