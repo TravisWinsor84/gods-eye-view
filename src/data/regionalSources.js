@@ -4,59 +4,58 @@ export const REGIONAL_SOURCES = Object.freeze({
   'melbourne-trees': Object.freeze({
     name: 'Melbourne Urban Forest', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
     endpoint: 'https://data.melbourne.vic.gov.au/api/explore/v2.1/', licence: 'CC BY (as declared by the selected dataset)',
-    geometry: 'point', refreshMs: 86_400_000, refresh: 'daily', credit: 'City of Melbourne Open Data', credential: 'none',
+    geometry: 'point', refreshMs: 86_400_000, refresh: 'daily', credit: 'City of Melbourne Open Data', credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
   }),
   'melbourne-places': Object.freeze({
     name: 'Melbourne Public Places', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
     endpoint: 'https://data.melbourne.vic.gov.au/api/explore/v2.1/', licence: 'CC BY (as declared by the selected dataset)',
-    geometry: 'point', refreshMs: 86_400_000, refresh: 'daily', credit: 'City of Melbourne Open Data', credential: 'none',
+    geometry: 'point', refreshMs: 86_400_000, refresh: 'daily', credit: 'City of Melbourne Open Data', credential: 'none', runtimeEligible: true, maxFeatures: 500,
   }),
   'melbourne-cycling': Object.freeze({
     name: 'Melbourne Cycling Network', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
     endpoint: 'https://data.melbourne.vic.gov.au/api/explore/v2.1/', licence: 'CC BY (as declared by the selected dataset)',
-    geometry: 'line', refreshMs: 86_400_000, refresh: 'daily', credit: 'City of Melbourne Open Data', credential: 'none',
+    geometry: 'line', refreshMs: 86_400_000, refresh: 'daily', credit: 'City of Melbourne Open Data', credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
   }),
   'melbourne-water-history': Object.freeze({
     name: 'Melbourne Water History', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
     endpoint: 'https://data.melbourne.vic.gov.au/api/explore/v2.1/', licence: 'CC BY (as declared by the selected dataset)',
-    geometry: 'line-or-polygon', refreshMs: 604_800_000, refresh: 'weekly', credit: 'City of Melbourne Open Data', credential: 'none',
+    geometry: 'line-or-polygon', refreshMs: 604_800_000, refresh: 'weekly', credit: 'City of Melbourne Open Data', credential: 'none', runtimeEligible: true, maxFeatures: 500,
   }),
   'vic-epa-air': Object.freeze({
     name: 'Victoria Air Quality', source: 'EPA Victoria', publisher: 'Environment Protection Authority Victoria',
     endpoint: 'https://www.epa.vic.gov.au/for-community/monitoring-your-environment/monitoring-victorias-water-quality', licence: 'EPA Victoria terms',
-    geometry: 'point', refreshMs: 300_000, refresh: 'five minutes; upstream observations update hourly', credit: 'EPA Victoria', credential: 'none',
+    geometry: 'point', refreshMs: 300_000, refresh: 'five minutes; upstream observations update hourly', credit: 'EPA Victoria', credential: 'none', runtimeEligible: true, maxFeatures: 250,
   }),
   'vic-cfa-alerts': Object.freeze({
-    name: 'Victoria Fire Alerts', source: 'VicEmergency', publisher: 'Emergency Management Victoria',
-    endpoint: 'https://www.emergency.vic.gov.au/', licence: 'Creative Commons Attribution 4.0 International',
-    geometry: 'point when an RSS item is geolocated', refreshMs: 300_000, refresh: 'five minutes', credit: 'VicEmergency / Emergency Management Victoria', credential: 'none',
+    name: 'CFA / VicEmergency RSS (restricted)', source: 'CFA RSS feeds', publisher: 'Country Fire Authority Victoria',
+    endpoint: 'https://www.cfa.vic.gov.au/rss-feeds', licence: 'CFA RSS terms: personal, non-commercial use; no modification',
+    geometry: 'not runtime eligible', refreshMs: 0, refresh: 'not fetched or normalized', credit: 'CFA RSS feeds', credential: 'restricted', runtimeEligible: false, maxFeatures: 0,
   }),
   'vic-fire-context': Object.freeze({
     name: 'Victoria Fire Context', source: 'DataVic', publisher: 'State of Victoria',
     endpoint: 'https://discover.data.vic.gov.au/', licence: 'Creative Commons Attribution 4.0 International',
-    geometry: 'polygon-or-line', refreshMs: 86_400_000, refresh: 'daily viewport query', credit: 'State of Victoria (DataVic)', credential: 'none',
+    geometry: 'polygon-or-line', refreshMs: 86_400_000, refresh: 'daily viewport query', credit: 'State of Victoria (DataVic)', credential: 'none', runtimeEligible: true, maxFeatures: 500,
   }),
   'vic-freight-network': Object.freeze({
     name: 'Victorian Freight Network', source: 'DataVic', publisher: 'State of Victoria',
     endpoint: 'https://discover.data.vic.gov.au/', licence: 'Creative Commons Attribution 4.0 International',
-    geometry: 'line-or-point', refreshMs: 86_400_000, refresh: 'daily viewport query', credit: 'State of Victoria (DataVic)', credential: 'none',
+    geometry: 'line-or-point', refreshMs: 86_400_000, refresh: 'daily viewport query', credit: 'State of Victoria (DataVic)', credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
   }),
   'au-hydrology': Object.freeze({
     name: 'Australian Hydrology', source: 'Australian Hydrological Geospatial Fabric', publisher: 'Bureau of Meteorology / Geoscience Australia',
     endpoint: 'https://www.bom.gov.au/water/geofabric/', licence: 'Creative Commons Attribution 4.0 International',
-    geometry: 'line-or-polygon', refreshMs: 604_800_000, refresh: 'weekly viewport query', credit: 'Bureau of Meteorology / Geoscience Australia', credential: 'none',
+    geometry: 'line-or-polygon', refreshMs: 604_800_000, refresh: 'weekly viewport query', credit: 'Bureau of Meteorology / Geoscience Australia', credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
   }),
   'ptv-transit': Object.freeze({
     name: 'PTV Transit', source: 'PTV Timetable API', publisher: 'Public Transport Victoria',
     endpoint: 'https://timetableapi.ptv.vic.gov.au/swagger/ui/index', licence: 'Creative Commons Attribution 4.0 International',
-    geometry: 'point', refreshMs: 60_000, refresh: 'one minute when server credentials are configured', credit: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.', credential: 'server-required',
+    geometry: 'point', refreshMs: 60_000, refresh: 'one minute when server credentials are configured', credit: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.', credential: 'server-required', runtimeEligible: true, maxFeatures: 1_000,
   }),
 });
 
 function sourceFor(sourceId) {
-  const source = REGIONAL_SOURCES[sourceId];
-  if (!source) throw new Error(`Unknown regional source: ${sourceId}`);
-  return source;
+  if (!Object.hasOwn(REGIONAL_SOURCES, sourceId)) throw new Error(`Unknown regional source: ${sourceId}`);
+  return REGIONAL_SOURCES[sourceId];
 }
 
 function cleanText(value, maxLength = MAX_TEXT_LENGTH) {
@@ -73,7 +72,9 @@ function safeUrl(value) {
 }
 
 function coordinate(value, min, max) {
-  const number = Number(value);
+  const number = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
   return Number.isFinite(number) && number >= min && number <= max ? number : null;
 }
 
@@ -92,8 +93,20 @@ function validCoordinates(type, coordinates) {
   return false;
 }
 
-function normalizeGeometry(geometry) {
-  if (!geometry || typeof geometry !== 'object' || !validCoordinates(geometry.type, geometry.coordinates)) return null;
+function geometryAllowed(source, type) {
+  const allowed = {
+    point: ['Point'],
+    line: ['LineString', 'MultiLineString'],
+    'line-or-polygon': ['LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'],
+    'polygon-or-line': ['Polygon', 'MultiPolygon', 'LineString', 'MultiLineString'],
+    'line-or-point': ['LineString', 'MultiLineString', 'Point'],
+  }[source.geometry];
+  return allowed?.includes(type) || false;
+}
+
+function normalizeGeometry(source, geometry) {
+  if (!geometry || typeof geometry !== 'object' || !geometryAllowed(source, geometry.type)
+    || !validCoordinates(geometry.type, geometry.coordinates)) return null;
   return { type: geometry.type, coordinates: geometry.coordinates };
 }
 
@@ -126,11 +139,11 @@ function recordFeatures(sourceId, payload) {
   });
 }
 
-function geoJsonFeatures(payload) {
+function geoJsonFeatures(source, payload) {
   const rows = payload?.type === 'FeatureCollection' ? payload.features : payload?.features;
   if (!Array.isArray(rows)) throw new Error('GeoJSON payload must contain a features array');
   return rows.flatMap((row) => {
-    const geometry = normalizeGeometry(row?.geometry);
+    const geometry = normalizeGeometry(source, row?.geometry);
     if (!geometry) return [];
     const properties = row?.properties || {};
     return [feature(row?.id ?? properties.id ?? properties.objectid, geometry, propertiesFor(properties,
@@ -152,25 +165,6 @@ function epaFeatures(payload) {
   });
 }
 
-function rssValue(item, tag) {
-  const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i').exec(item);
-  return cleanText(match?.[1]?.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1'));
-}
-
-function rssFeatures(payload) {
-  if (typeof payload !== 'string') throw new Error('vic-cfa-alerts payload must be an RSS string');
-  const items = [...payload.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)].map((match) => match[1]);
-  if (!items.length) throw new Error('vic-cfa-alerts payload contains no complete RSS items');
-  return items.flatMap((item) => {
-    const point = rssValue(item, 'georss:point').split(/\s+/).map(Number);
-    const latitude = coordinate(point[0], -90, 90);
-    const longitude = coordinate(point[1], -180, 180);
-    if (latitude === null || longitude === null) return [];
-    return [feature(rssValue(item, 'guid') || rssValue(item, 'link'), { type: 'Point', coordinates: [longitude, latitude] },
-      propertiesFor({ link: rssValue(item, 'link') }, rssValue(item, 'title') || 'VicEmergency alert'))];
-  });
-}
-
 function ptvFeatures(payload) {
   if (!Array.isArray(payload?.stops)) throw new Error('ptv-transit payload must contain a stops array');
   return payload.stops.flatMap((stop) => {
@@ -185,14 +179,14 @@ function ptvFeatures(payload) {
 
 /** Convert one approved source's public payload into a bounded GeoJSON FeatureCollection. */
 export function normalizeRegionalFeatureCollection(sourceId, payload) {
-  sourceFor(sourceId);
+  const source = sourceFor(sourceId);
+  if (!source.runtimeEligible) throw new Error(`${sourceId} is not runtime eligible: restricted source terms`);
   let features;
   if (['melbourne-trees', 'melbourne-places'].includes(sourceId)) features = recordFeatures(sourceId, payload);
   else if (sourceId === 'vic-epa-air') features = epaFeatures(payload);
-  else if (sourceId === 'vic-cfa-alerts') features = rssFeatures(payload);
   else if (sourceId === 'ptv-transit') features = ptvFeatures(payload);
-  else features = geoJsonFeatures(payload);
-  return { type: 'FeatureCollection', features };
+  else features = geoJsonFeatures(source, payload);
+  return { type: 'FeatureCollection', features: features.slice(0, source.maxFeatures) };
 }
 
 /** Return the source's required display attribution, or reject an unknown source. */
