@@ -38,6 +38,27 @@ How to read this:
 | **Radio Browser** | Geolocated internet-radio station directory and station-level tags | Public-domain directory data under PDDL 1.0; individual broadcaster stream terms apply | "Radio Browser" plus a link to the selected broadcaster |
 | **Re:Earth Terrain** (Mapterhorn) | Terrain (keyless globe stacks — OSM etc. — + `/api/terrain/heights` ellipsoidal-height lookups) | Terrain mesh: CC BY 4.0; geoid: EGM2008 (NGA, public domain) | "Terrain (keyless globe stacks): Re:Earth Terrain / Mapterhorn (CC BY 4.0) / EGM2008 (NGA)" |
 
+### Victorian and Australian regional catalogue (registered contracts; not yet active)
+
+These source contracts are catalogue metadata only. No browser fetches, Vite
+routes, keys, or layers have been enabled by this entry. A later proxy task
+must validate the specific dataset endpoint, terms, payload cap, timeout, and
+cache behaviour before it is activated. Any credential remains server-side;
+none is documented here.
+
+| Source ID | Official publisher and endpoint | Licence / terms | Exact attribution | Geometry | Refresh model |
+|-----------|---------------------------------|-----------------|-------------------|----------|---------------|
+| `melbourne-trees` | City of Melbourne, [Open Data Explore API](https://data.melbourne.vic.gov.au/api-console/explore/v2.1/) | CC BY, as declared by the selected City of Melbourne dataset | `City of Melbourne Open Data` | Point | Daily; source record catalogue refresh |
+| `melbourne-places` | City of Melbourne, [Open Data Explore API](https://data.melbourne.vic.gov.au/api-console/explore/v2.1/) | CC BY, as declared by the selected City of Melbourne dataset | `City of Melbourne Open Data` | Point | Daily; source record catalogue refresh |
+| `melbourne-cycling` | City of Melbourne, [Open Data Explore API](https://data.melbourne.vic.gov.au/api-console/explore/v2.1/) | CC BY, as declared by the selected City of Melbourne dataset | `City of Melbourne Open Data` | Line | Daily; viewport-bounded source query |
+| `melbourne-water-history` | City of Melbourne, [Open Data Explore API](https://data.melbourne.vic.gov.au/api-console/explore/v2.1/) | CC BY, as declared by the selected City of Melbourne dataset | `City of Melbourne Open Data` | Line or polygon | Weekly; static/historical source check |
+| `vic-epa-air` | Environment Protection Authority Victoria, [environment monitoring API information](https://www.epa.vic.gov.au/for-community/monitoring-your-environment/monitoring-victorias-water-quality) | EPA Victoria developer/API terms; validate the API-access terms before activation | `EPA Victoria` | Point | Five-minute application refresh; EPA observations update hourly |
+| `vic-cfa-alerts` | Emergency Management Victoria, [VicEmergency](https://www.emergency.vic.gov.au/) RSS/alert publication | Creative Commons Attribution 4.0 International | `VicEmergency / Emergency Management Victoria` | Point only when a feed item supplies valid coordinates | Five minutes; no unlocated alert is mapped |
+| `vic-fire-context` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Polygon or line | Daily viewport query |
+| `vic-freight-network` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Line or point | Daily viewport query |
+| `au-hydrology` | Bureau of Meteorology / Geoscience Australia, [Australian Hydrological Geospatial Fabric](https://www.bom.gov.au/water/geofabric/) | Creative Commons Attribution 4.0 International, subject to the selected service/dataset listing | `Bureau of Meteorology / Geoscience Australia` | Line or polygon | Weekly viewport query |
+| `ptv-transit` | Public Transport Victoria, [PTV Timetable API v3](https://timetableapi.ptv.vic.gov.au/swagger/ui/index) | Creative Commons Attribution 4.0 International; a PTV developer ID, request signature, and API key are required server-side | `Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.` | Point (stops) | One minute only when the server-side PTV credentials are configured |
+
 ### Notes on the live sources
 
 - **Google Maps Platform.** You supply your own API key and are bound by [Google's ToS](https://cloud.google.com/maps-platform/terms). Google Maps Content (tiles, geocodes, places) **may not be cached, stored, rehosted, or committed** — this app only ever uses it live, which is the compliant pattern. The "Google" attribution is displayed on the globe and must stay visible. Restrict your key (see [SECURITY.md](SECURITY.md)).
