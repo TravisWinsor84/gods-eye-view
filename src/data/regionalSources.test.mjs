@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  CIVIC_SOURCE_VALIDATION,
   REGIONAL_SOURCES,
   normalizeRegionalFeatureCollection,
   regionalSourceAttribution,
@@ -18,6 +19,7 @@ test('registry declares the approved regional source IDs with immutable source c
     'vic-freight-network',
     'au-hydrology',
     'ptv-transit',
+    'au-hospital-ed-performance',
   ]);
   assert.equal(Object.isFrozen(REGIONAL_SOURCES), true);
   assert.equal(Object.isFrozen(REGIONAL_SOURCES['melbourne-trees']), true);
@@ -26,6 +28,122 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['ptv-transit'].credential, 'server-required');
   assert.equal(REGIONAL_SOURCES['vic-cfa-alerts'].runtimeEligible, false);
   assert.ok(Number.isInteger(REGIONAL_SOURCES['melbourne-trees'].maxFeatures));
+});
+
+test('civic validation decisions keep executable and non-executable contracts separate', () => {
+  const requiredFields = ['publisher', 'officialUrl', 'endpoint', 'licence', 'cacheMs', 'geometry', 'sensitivityReview', 'runtimeEligible'];
+  for (const [sourceId, decision] of Object.entries(CIVIC_SOURCE_VALIDATION)) {
+    assert.deepEqual(requiredFields.filter((field) => !Object.hasOwn(decision, field)), [], sourceId);
+    assert.equal(Object.isFrozen(decision), true, sourceId);
+  }
+  const aihw = CIVIC_SOURCE_VALIDATION['au-hospital-ed-performance'];
+  assert.equal(aihw.runtimeEligible, true);
+  assert.equal(aihw.cacheMs, 86_400_000);
+  assert.equal(aihw.credential, 'none');
+
+  for (const sourceId of [
+    'vahi-daily-ed-wait',
+    'vahi-quarterly-emergency-care',
+    'ambulance-victoria-quarterly-performance',
+    'victraffic-cameras',
+    'boating-vic-cameras',
+    'gippsland-ports-webcams',
+    'port-phillip-marina-webcam',
+    'ffmvic-cameras',
+    'bom-imagery',
+  ]) {
+    const decision = CIVIC_SOURCE_VALIDATION[sourceId];
+    assert.equal(decision.runtimeEligible, false, sourceId);
+    assert.equal(decision.endpoint, null, sourceId);
+    assert.equal('request' in decision, false, sourceId);
+    assert.equal('proxyRequest' in decision, false, sourceId);
+  }
+});
+
+test('normalizes AIHW aggregate historical ED performance with provenance and freshness', () => {
+  const result = normalizeRegionalFeatureCollection('au-hospital-ed-performance', {
+    extract: {
+      result: { data: [{
+        reporting_unit_code: 'H9999',
+        reporting_unit_name: 'Example Public Hospital',
+        reporting_unit_type_code: 'H',
+        measure_code: 'MYH0010',
+        measure_name: 'Percentage of patients who commenced treatment within the recommended time',
+        reported_measure_code: 'MYH-RM0037',
+        reported_measure_name: 'Urgent presentations',
+        reporting_start_date: '2024-07-01',
+        reporting_end_date: '2025-06-30',
+        value: 74.2,
+        lower_value: 72.1,
+        upper_value: 76.3,
+        units_name: 'percent',
+        units_display: '%',
+        caveat: 'Preliminary annual result',
+        caveat_codes: 'P',
+        caveat_footnotes: 'Subject to revision',
+      }] },
+      version_information: {
+        api_version: '1.6.4.0', data_version: 2026052802,
+        date_uploaded: '2026-05-28T00:00:00', requested_time_stamp: '2026-09-05T12:00:00+10:00',
+      },
+    },
+    reportingUnits: { result: [{
+      reporting_unit_code: 'H9999', latitude: -37.81, longitude: 144.96,
+    }] },
+  });
+
+  assert.deepEqual(result.features[0].geometry.coordinates, [144.96, -37.81]);
+  assert.deepEqual(result.features[0].properties.reportingPeriod, { start: '2024-07-01', end: '2025-06-30' });
+  assert.deepEqual(result.features[0].properties.freshness, {
+    apiVersion: '1.6.4.0', dataVersion: 2026052802,
+    uploadedAt: '2026-05-28T00:00:00', requestedAt: '2026-09-05T12:00:00+10:00',
+  });
+  assert.equal(result.features[0].properties.value, 74.2);
+  assert.equal(result.features[0].properties.errorState, 'caveated');
+  assert.deepEqual(result.features[0].properties.caveats, [{ code: 'P', label: 'Preliminary annual result', footnote: 'Subject to revision' }]);
+  assert.equal(result.features[0].properties.sourceId, 'au-hospital-ed-performance');
+  assert.equal(result.features[0].properties.source, 'Australian Institute of Health and Welfare');
+  assert.equal(result.features[0].properties.officialUrl, 'https://www.aihw.gov.au/hospitals/other-resources/myhospitals-api');
+  assert.equal(result.features[0].properties.context, 'aggregate historical ED performance');
+});
+
+test('never surfaces suppressed AIHW values as numbers', () => {
+  const result = normalizeRegionalFeatureCollection('au-hospital-ed-performance', {
+    extract: {
+      result: { data: [{
+        reporting_unit_code: 'H9999', reporting_unit_name: 'Example Public Hospital', reporting_unit_type_code: 'H',
+        measure_code: 'MYH0011', measure_name: 'Number of patients presenting to the emergency department',
+        reported_measure_code: 'MYH-RM0030', reported_measure_name: 'Resuscitation',
+        reporting_start_date: '2024-07-01', reporting_end_date: '2025-06-30',
+        value: 123, lower_value: 100, upper_value: 140, suppression: 'Suppressed',
+        suppression_codes: 'NP', caveat_footnotes: 'Not published for confidentiality reasons',
+      }] },
+      version_information: { data_version: 2026052802, date_uploaded: '2026-05-28T00:00:00' },
+    },
+    reportingUnits: { result: [{ reporting_unit_code: 'H9999', latitude: -37.81, longitude: 144.96 }] },
+  });
+
+  const properties = result.features[0].properties;
+  assert.equal(properties.suppressed, true);
+  assert.equal(properties.errorState, 'suppressed');
+  assert.equal('value' in properties, false);
+  assert.equal('lowerValue' in properties, false);
+  assert.equal('upperValue' in properties, false);
+  assert.deepEqual(properties.caveats, [{ code: 'NP', label: 'Suppressed', footnote: 'Not published for confidentiality reasons' }]);
+});
+
+test('rejected hospital and camera decisions fail closed before payload access', () => {
+  const unreadablePayload = {
+    get result() {
+      throw new Error('payload must not be read');
+    },
+  };
+  for (const [sourceId, source] of Object.entries(CIVIC_SOURCE_VALIDATION).filter(([, candidate]) => !candidate.runtimeEligible)) {
+    assert.throws(
+      () => normalizeRegionalFeatureCollection(sourceId, unreadablePayload),
+      new RegExp(`${sourceId} is not runtime eligible: ${source.decision}`),
+    );
+  }
 });
 
 test('normalizes City of Melbourne tree records', () => {
@@ -165,5 +283,6 @@ test('normalization stops before reading rows after a source feature cap', () =>
 test('attribution is exact, source-scoped, and rejects unknown IDs', () => {
   assert.equal(regionalSourceAttribution('melbourne-trees'), 'City of Melbourne Open Data');
   assert.equal(regionalSourceAttribution('vic-epa-air'), 'EPA Victoria');
+  assert.equal(regionalSourceAttribution('au-hospital-ed-performance'), 'Based on Australian Institute of Health and Welfare material.');
   assert.throws(() => regionalSourceAttribution('nope'), /Unknown regional source: nope/);
 });

@@ -1,5 +1,81 @@
 const MAX_TEXT_LENGTH = 512;
 
+function civicDecision(decision) {
+  return Object.freeze(decision);
+}
+
+export const CIVIC_SOURCE_VALIDATION = Object.freeze({
+  'au-hospital-ed-performance': civicDecision({
+    publisher: 'Australian Institute of Health and Welfare',
+    officialUrl: 'https://www.aihw.gov.au/hospitals/other-resources/myhospitals-api',
+    endpoint: 'https://myhospitalsapi.aihw.gov.au/api/v1/flat-data-extract/MYH-ED-WAITS',
+    licence: 'Creative Commons Attribution 4.0 International', cacheMs: 86_400_000, geometry: 'point',
+    sensitivityReview: 'Aggregate historical ED performance only; excludes live waits, demand, capacity, ambulance offload, routing and forecasts.',
+    runtimeEligible: true, decision: 'runtime-eligible', credential: 'none',
+  }),
+  'vahi-daily-ed-wait': civicDecision({
+    publisher: 'Victorian Agency for Health Information',
+    officialUrl: 'https://vahi.vic.gov.au/reports/emergency-department-non-urgent-wait-time',
+    endpoint: null, licence: 'Written publisher permission required', cacheMs: 0, geometry: 'metadata-only',
+    sensitivityReview: 'A daily non-live estimate could be mistaken for clinical advice or current treatment availability.',
+    runtimeEligible: false, decision: 'permission-required', credential: 'not-applicable',
+  }),
+  'vahi-quarterly-emergency-care': civicDecision({
+    publisher: 'Victorian Agency for Health Information',
+    officialUrl: 'https://vahi.vic.gov.au/emergency-care/ambulance-patient-transfers',
+    endpoint: null, licence: 'Publisher page terms; no supported public data feed', cacheMs: 0, geometry: 'metadata-only',
+    sensitivityReview: 'Quarterly aggregate context only; never current ambulance offload, capacity or routing information.',
+    runtimeEligible: false, decision: 'metadata-link-only', credential: 'not-applicable',
+  }),
+  'ambulance-victoria-quarterly-performance': civicDecision({
+    publisher: 'Ambulance Victoria', officialUrl: 'https://www.ambulance.vic.gov.au/our-performance',
+    endpoint: null, licence: 'Creative Commons Attribution 4.0 International, excluding images, branding and third-party material',
+    cacheMs: 0, geometry: 'metadata-only',
+    sensitivityReview: 'Quarterly PDF reports are historical performance, not current ambulance availability or an emergency forecast.',
+    runtimeEligible: false, decision: 'metadata-link-only', credential: 'not-applicable',
+  }),
+  'victraffic-cameras': civicDecision({
+    publisher: 'Victorian Department of Transport and Planning',
+    officialUrl: 'https://transport.vic.gov.au/road-and-active-transport/business-and-industry/road-and-traffic-management/traffic-cameras-and-cctv',
+    endpoint: null, licence: 'Creative Commons Attribution 4.0 International excludes images and third-party material',
+    cacheMs: 0, geometry: 'metadata-only',
+    sensitivityReview: 'Road imagery can contain people, number plates and incidents; no archiving, identification or operational inference.',
+    runtimeEligible: false, decision: 'metadata-link-only', credential: 'not-applicable',
+  }),
+  'boating-vic-cameras': civicDecision({
+    publisher: 'Safe Transport Victoria', officialUrl: 'https://www.boating.vic.gov.au/', endpoint: null,
+    licence: 'Creative Commons Attribution 4.0 International excludes images, photographs, branding and third-party material',
+    cacheMs: 0, geometry: 'metadata-only',
+    sensitivityReview: 'Ramp imagery can contain people, vessels and number plates and is not authoritative boating or weather advice.',
+    runtimeEligible: false, decision: 'metadata-link-only', credential: 'not-applicable',
+  }),
+  'gippsland-ports-webcams': civicDecision({
+    publisher: 'Gippsland Ports', officialUrl: 'https://gippslandports.vic.gov.au/boating/webcams/', endpoint: null,
+    licence: 'No public image-reuse grant; player direct-linking is unauthorised', cacheMs: 0, geometry: 'metadata-only',
+    sensitivityReview: 'Webcam views can contain identifiable people and vessels and must not be used as navigational advice.',
+    runtimeEligible: false, decision: 'rejected', credential: 'not-applicable',
+  }),
+  'port-phillip-marina-webcam': civicDecision({
+    publisher: 'City of Port Phillip',
+    officialUrl: 'https://www.portphillip.vic.gov.au/explore-the-city/beaches-parks-and-playgrounds/find-parks-and-playgrounds/marina-reserve',
+    endpoint: null, licence: 'Written council permission required for image republication', cacheMs: 0, geometry: 'metadata-only',
+    sensitivityReview: 'A public low-resolution player does not grant retention or aggregation rights for imagery of people at the reserve.',
+    runtimeEligible: false, decision: 'permission-required', credential: 'not-applicable',
+  }),
+  'ffmvic-cameras': civicDecision({
+    publisher: 'Forest Fire Management Victoria', officialUrl: 'https://fireweb.ffm.vic.gov.au/', endpoint: null,
+    licence: 'Restricted registered-user operational service; no public reuse grant', cacheMs: 0, geometry: 'metadata-only',
+    sensitivityReview: 'Operational fire-management imagery and critical-infrastructure context are outside public runtime scope.',
+    runtimeEligible: false, decision: 'rejected', credential: 'restricted',
+  }),
+  'bom-imagery': civicDecision({
+    publisher: 'Bureau of Meteorology', officialUrl: 'https://www.bom.gov.au/catalogue/data-feeds.shtml', endpoint: null,
+    licence: 'Product-specific Bureau data licence required for redistribution', cacheMs: 0, geometry: 'raster-metadata-only',
+    sensitivityReview: 'Weather imagery is not CCTV; anonymous access does not establish display, redistribution or caching rights.',
+    runtimeEligible: false, decision: 'licence-required', credential: 'registration-may-be-required',
+  }),
+});
+
 export const REGIONAL_SOURCES = Object.freeze({
   'melbourne-trees': Object.freeze({
     name: 'Melbourne Urban Forest', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
@@ -51,9 +127,19 @@ export const REGIONAL_SOURCES = Object.freeze({
     endpoint: 'https://timetableapi.ptv.vic.gov.au/swagger/ui/index', licence: 'Creative Commons Attribution 4.0 International',
     geometry: 'point', refreshMs: 60_000, refresh: 'one minute when server credentials are configured', credit: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.', credential: 'server-required', runtimeEligible: true, maxFeatures: 1_000,
   }),
+  'au-hospital-ed-performance': Object.freeze({
+    name: 'Australian historical ED performance', source: 'AIHW MyHospitals',
+    ...CIVIC_SOURCE_VALIDATION['au-hospital-ed-performance'],
+    refreshMs: 86_400_000, refresh: 'daily cache check; data changes on AIHW release cycles',
+    credit: 'Based on Australian Institute of Health and Welfare material.', maxFeatures: 1_000,
+  }),
 });
 
 function sourceFor(sourceId) {
+  if (Object.hasOwn(CIVIC_SOURCE_VALIDATION, sourceId)
+    && !CIVIC_SOURCE_VALIDATION[sourceId].runtimeEligible) {
+    throw new Error(`${sourceId} is not runtime eligible: ${CIVIC_SOURCE_VALIDATION[sourceId].decision}`);
+  }
   if (!Object.hasOwn(REGIONAL_SOURCES, sourceId)) throw new Error(`Unknown regional source: ${sourceId}`);
   return REGIONAL_SOURCES[sourceId];
 }
@@ -189,6 +275,79 @@ function ptvFeatures(payload, maxFeatures) {
   });
 }
 
+function aihwCaveats(row) {
+  const caveats = [];
+  const append = (label, code, footnote) => {
+    if (!cleanText(label) && !cleanText(code, 180)) return;
+    const normalized = {
+      ...(cleanText(code, 180) ? { code: cleanText(code, 180) } : {}),
+      ...(cleanText(label) ? { label: cleanText(label) } : {}),
+      ...(cleanText(footnote) ? { footnote: cleanText(footnote) } : {}),
+    };
+    if (Object.keys(normalized).length) caveats.push(normalized);
+  };
+  append(row?.suppression, row?.suppression_codes, row?.suppression_footnotes || row?.caveat_footnotes);
+  append(row?.caveat, row?.caveat_codes, row?.caveat_footnotes);
+  append(row?.data_set_caveat, row?.data_set_caveat_codes, row?.data_set_caveat_footnotes);
+  return caveats;
+}
+
+function aihwFeatures(source, payload) {
+  const extract = payload?.extract;
+  if (!Array.isArray(extract?.result?.data)) {
+    throw new Error('au-hospital-ed-performance payload must contain extract.result.data');
+  }
+  if (!Array.isArray(payload?.reportingUnits?.result)) {
+    throw new Error('au-hospital-ed-performance payload must contain reportingUnits.result');
+  }
+  const version = extract.version_information;
+  if (!version || version.data_version === undefined || !cleanText(version.date_uploaded, 80)) {
+    throw new Error('au-hospital-ed-performance payload must retain AIHW version information');
+  }
+  const reportingUnits = new Map(payload.reportingUnits.result.map((unit) => [unit?.reporting_unit_code, unit]));
+  const allowedMeasures = new Set(['MYH0010', 'MYH0011']);
+
+  return collectFeatures(extract.result.data, source.maxFeatures, (row) => {
+    if (row?.reporting_unit_type_code !== 'H' || !allowedMeasures.has(row?.measure_code)) return null;
+    const unit = reportingUnits.get(row.reporting_unit_code);
+    const longitude = coordinate(unit?.longitude, -180, 180);
+    const latitude = coordinate(unit?.latitude, -90, 90);
+    const start = cleanText(row?.reporting_start_date, 80);
+    const end = cleanText(row?.reporting_end_date, 80);
+    if (longitude === null || latitude === null || !start || !end) return null;
+
+    const caveats = aihwCaveats(row);
+    const suppressed = row.value === null || Boolean(cleanText(row?.suppression) || cleanText(row?.suppression_codes));
+    const numericValue = typeof row.value === 'number' && Number.isFinite(row.value) ? row.value : null;
+    const errorState = suppressed ? 'suppressed' : numericValue === null ? 'unavailable' : caveats.length ? 'caveated' : 'none';
+    const properties = {
+      title: cleanText(row.reporting_unit_name, 180) || 'Australian public hospital',
+      sourceId: 'au-hospital-ed-performance', source: source.publisher, officialUrl: source.officialUrl,
+      context: 'aggregate historical ED performance', historical: true,
+      reportingUnitCode: cleanText(row.reporting_unit_code, 80),
+      reportingUnitType: 'Hospital',
+      measureCode: row.measure_code, measure: cleanText(row.measure_name),
+      reportedMeasureCode: cleanText(row.reported_measure_code, 80), reportedMeasure: cleanText(row.reported_measure_name),
+      reportingPeriod: { start, end },
+      freshness: {
+        ...(cleanText(version.api_version, 80) ? { apiVersion: cleanText(version.api_version, 80) } : {}),
+        dataVersion: version.data_version,
+        uploadedAt: cleanText(version.date_uploaded, 80),
+        ...(cleanText(version.requested_time_stamp, 80) ? { requestedAt: cleanText(version.requested_time_stamp, 80) } : {}),
+      },
+      caveats, suppressed, errorState,
+      units: { name: cleanText(row.units_name, 80), display: cleanText(row.units_display, 20) },
+    };
+    if (!suppressed && numericValue !== null) {
+      properties.value = numericValue;
+      if (typeof row.lower_value === 'number' && Number.isFinite(row.lower_value)) properties.lowerValue = row.lower_value;
+      if (typeof row.upper_value === 'number' && Number.isFinite(row.upper_value)) properties.upperValue = row.upper_value;
+    }
+    const id = [row.reporting_unit_code, row.measure_code, row.reported_measure_code, start, end].filter(Boolean).join(':');
+    return feature(id, { type: 'Point', coordinates: [longitude, latitude] }, properties);
+  });
+}
+
 /** Convert one approved source's public payload into a bounded GeoJSON FeatureCollection. */
 export function normalizeRegionalFeatureCollection(sourceId, payload) {
   const source = sourceFor(sourceId);
@@ -197,6 +356,7 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   if (['melbourne-trees', 'melbourne-places'].includes(sourceId)) features = recordFeatures(sourceId, payload, source.maxFeatures);
   else if (sourceId === 'vic-epa-air') features = epaFeatures(payload, source.maxFeatures);
   else if (sourceId === 'ptv-transit') features = ptvFeatures(payload, source.maxFeatures);
+  else if (sourceId === 'au-hospital-ed-performance') features = aihwFeatures(source, payload);
   else features = geoJsonFeatures(source, payload, source.maxFeatures);
   return { type: 'FeatureCollection', features };
 }

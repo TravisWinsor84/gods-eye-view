@@ -58,6 +58,38 @@ none is documented here.
 | `vic-freight-network` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Line or point | Daily viewport query |
 | `au-hydrology` | Bureau of Meteorology / Geoscience Australia, [Australian Hydrological Geospatial Fabric](https://www.bom.gov.au/water/geofabric/) | Creative Commons Attribution 4.0 International, subject to the selected service/dataset listing | `Bureau of Meteorology / Geoscience Australia` | Line or polygon | Weekly viewport query |
 | `ptv-transit` | Public Transport Victoria, [PTV Timetable API v3](https://timetableapi.ptv.vic.gov.au/swagger/ui/index) | Creative Commons Attribution 4.0 International; a PTV developer ID, request signature, and API key are required server-side | `Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.` | Point (stops) | One minute only when the server-side PTV credentials are configured |
+| `au-hospital-ed-performance` | Australian Institute of Health and Welfare, [MyHospitals API](https://www.aihw.gov.au/hospitals/other-resources/myhospitals-api) | [CC BY 4.0](https://www.aihw.gov.au/copyright); no credentials | `Based on Australian Institute of Health and Welfare material.` | Point (hospital reporting units) | 24-hour application cache; release-cycle historical data |
+
+`au-hospital-ed-performance` is approved only for aggregate, period-based
+AIHW MyHospitals emergency-department performance. It is never a live wait,
+demand, capacity, ambulance-offload, medical-routing or treatment-forecast
+source. Every normalized datum keeps its official link, reporting period, API
+freshness metadata, caveats and error state. Suppressed values are marked but
+never emitted as numbers. This registration does not add a proxy, layer or UI.
+
+### Australian civic candidates that are not executable
+
+The separate validation-decision catalogue in `src/data/regionalSources.js`
+keeps the following records out of executable regional-source contracts. They
+have `runtimeEligible: false`, `endpoint: null`, no request template and no
+image proxy/cache permission. Canonical official pages may be linked only.
+
+| Candidate | Decision | Boundary |
+|-----------|----------|----------|
+| [VAHI daily non-urgent ED wait](https://vahi.vic.gov.au/reports/emergency-department-non-urgent-wait-time) | Permission required | Daily but not live; no supported machine endpoint and VAHI requires prior written consent for republication. |
+| [VAHI quarterly emergency care](https://vahi.vic.gov.au/emergency-care/ambulance-patient-transfers) | Metadata/link-only | Quarterly and preliminary where stated; no supported public data feed. |
+| [Ambulance Victoria quarterly performance](https://www.ambulance.vic.gov.au/our-performance) | Metadata/link-only | Official reports are PDFs, not a stable runtime feed; they do not show current ambulance availability. |
+| [DTP/VicTraffic cameras](https://transport.vic.gov.au/road-and-active-transport/business-and-industry/road-and-traffic-management/traffic-cameras-and-cctv) | Metadata/link-only | No documented public image API; the general CC BY licence excludes images and third-party material. |
+| [Boating Vic cameras](https://www.boating.vic.gov.au/) | Metadata/link-only | No documented public image API; Safe Transport Victoria's general licence excludes images, photographs and third-party material. |
+| [Gippsland Ports webcams](https://gippslandports.vic.gov.au/boating/webcams/) | Restricted/rejected | No image-reuse grant; the publisher's embedded players do not authorise direct linking. |
+| [City of Port Phillip Marina Reserve webcam](https://www.portphillip.vic.gov.au/explore-the-city/beaches-parks-and-playgrounds/find-parks-and-playgrounds/marina-reserve) | Permission required | A public low-resolution player is not a supported still-image API or republication licence. |
+| [FFMVic FireWeb cameras](https://fireweb.ffm.vic.gov.au/) | Restricted/rejected | Registered operational service; no anonymous camera API or public reuse grant. |
+| [Bureau of Meteorology imagery](https://www.bom.gov.au/catalogue/data-feeds.shtml) | Licence required | Product-specific display/redistribution rights are required; anonymous availability is not a public runtime-image licence. |
+
+No investigated Australian camera source is runtime-image eligible. Do not
+scrape viewers, derive private endpoints, hotlink, proxy, archive or cache their
+images. Full validation evidence and adapter details are in
+[`docs/australian-civic-source-validation.md`](docs/australian-civic-source-validation.md).
 
 ### Notes on the live sources
 
