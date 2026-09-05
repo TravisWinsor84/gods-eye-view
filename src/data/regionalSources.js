@@ -3,6 +3,7 @@ import {
   CITY_OF_MELBOURNE_CREDIT,
   normalizeMelbourneCivicPayload,
 } from './melbourneCivicSources.js';
+import { OGC_SOURCE_CREDITS, normalizeOgcPayload } from './ogcRegionalSources.js';
 
 const MAX_TEXT_LENGTH = 512;
 
@@ -150,6 +151,34 @@ export const REGIONAL_SOURCES = Object.freeze({
     licence: 'Geoscience Australia service attribution; compiled reference data',
     geometry: 'point', refreshMs: 604_800_000, refresh: 'weekly viewport query; compiled reference data',
     credit: GA_SOURCE_CREDITS['au-place-names'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'au-dea-hotspots': Object.freeze({
+    name: 'Digital Earth Australia Hotspots', source: 'Digital Earth Australia', publisher: 'Geoscience Australia',
+    endpoint: 'https://hotspots.dea.ga.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'point', refreshMs: 300_000, maxStaleMs: 900_000,
+    refresh: 'five-minute viewport cache over the fixed three-day observation layer; last-good limited to fifteen minutes',
+    credit: OGC_SOURCE_CREDITS['au-dea-hotspots'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'vic-parks': Object.freeze({
+    name: 'Victorian Parks and Reserves', source: 'DataVic', publisher: 'State of Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'polygon', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'daily viewport cache; reference reserve boundaries', credit: OGC_SOURCE_CREDITS['vic-parks'],
+    credential: 'none', runtimeEligible: true, maxFeatures: 500,
+  }),
+  'vic-recreation-tracks': Object.freeze({
+    name: 'Victorian Recreation Tracks', source: 'DataVic', publisher: 'State of Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'line', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'daily viewport cache; reference alignment only, not live closure or condition state',
+    credit: OGC_SOURCE_CREDITS['vic-recreation-tracks'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'vic-heritage': Object.freeze({
+    name: 'Victorian Heritage Register', source: 'DataVic', publisher: 'State of Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'polygon', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'unknown publisher cadence; daily viewport cache', credit: OGC_SOURCE_CREDITS['vic-heritage'],
+    credential: 'none', runtimeEligible: true, maxFeatures: 250,
   }),
   'melbourne-drinking-fountains': Object.freeze({
     name: 'Melbourne Drinking Fountains', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
@@ -502,6 +531,9 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   if (['melbourne-trees', 'melbourne-places'].includes(sourceId)) features = recordFeatures(sourceId, payload, source.maxFeatures);
   else if (['au-emergency-facilities', 'au-health-facilities', 'au-place-names'].includes(sourceId)) {
     return normalizeGaRegionalPayload(sourceId, payload);
+  }
+  else if (['au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage'].includes(sourceId)) {
+    return normalizeOgcPayload(sourceId, payload, { maxFeatures: source.maxFeatures });
   }
   else if (['melbourne-drinking-fountains', 'melbourne-barbecues', 'melbourne-parking-live', 'melbourne-development', 'melbourne-culture'].includes(sourceId)) {
     return normalizeMelbourneCivicPayload(sourceId, payload, { maxFeatures: source.maxFeatures });

@@ -2,6 +2,7 @@ import { REGIONAL_SOURCES, normalizeRegionalFeatureCollection, regionalSourceAva
 import { gaArcGisRequests } from './gaRegionalSources.js';
 import { createTransportVicGtfs } from './transportVicGtfs.js';
 import { createMelbourneCivicClient } from './melbourneCivicSources.js';
+import { OGC_MAX_RESPONSE_BYTES, normalizeOgcPayload, ogcFeatureRequest } from './ogcRegionalSources.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -18,6 +19,8 @@ const MELBOURNE_CIVIC_SOURCE_IDS = new Set([
   'melbourne-development',
   'melbourne-culture',
 ]);
+const OGC_SOURCE_IDS = new Set(['au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage']);
+const OGC_TIMEOUT_MS = 20_000;
 const MAX_GA_PAGES_PER_LAYER = 2;
 const GA_TIMEOUT_MS = 20_000;
 const GA_GAZETTEER_TIMEOUT_MS = 30_000;
@@ -271,6 +274,37 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
       }
       return normalizeRegionalFeatureCollection(sourceId, layerResults);
     }
+    if (OGC_SOURCE_IDS.has(sourceId)) {
+      return withProviderRequestSlot(async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => {
+          const error = new Error('timeout');
+          error.code = 'TIMEOUT';
+          controller.abort(error);
+        }, timeoutMs ?? OGC_TIMEOUT_MS);
+        try {
+          const response = await fetchImpl(ogcFeatureRequest(sourceId, bbox, source.maxFeatures), {
+            method: 'GET', headers: { Accept: 'application/geo+json, application/json' }, signal: controller.signal, redirect: 'error',
+          });
+          if (!response?.ok) throw new Error('upstream failed');
+          const contentType = response.headers?.get?.('content-type') || '';
+          if (!/^application\/(?:geo\+json|(?:[a-z0-9!#$&^_.+-]+\+)?json)(?:\s*;|$)/i.test(contentType)) {
+            const error = new Error('invalid provider media type');
+            error.code = 'INVALID_MEDIA_TYPE';
+            throw error;
+          }
+          if (!response.body?.getReader) {
+            const error = new Error('unbounded provider body');
+            error.code = 'INVALID_OGC_RESPONSE';
+            throw error;
+          }
+          const payload = await readJsonCapped(response, OGC_MAX_RESPONSE_BYTES);
+          return normalizeOgcPayload(sourceId, payload, { maxFeatures: source.maxFeatures });
+        } finally {
+          clearTimeout(timer);
+        }
+      });
+    }
     const transport = SOURCE_TRANSPORT[sourceId];
     if (!transport) throw new Error('source unavailable');
     return withProviderRequestSlot(async () => {
@@ -371,7 +405,8 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     } catch (error) {
       if (canServeLastGood()) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
       if (error?.code === 'RESPONSE_TOO_LARGE') return sendJson(res, 502, { error: 'regional source response was too large' });
-      if (error?.code === 'INVALID_JSON' || error?.code === 'INVALID_GA_RESPONSE' || error?.message === 'source unavailable') return sendJson(res, 502, { error: 'regional source returned invalid data' });
+      if (['INVALID_JSON', 'INVALID_GA_RESPONSE', 'INVALID_MEDIA_TYPE', 'INVALID_OGC_RESPONSE', 'INVALID_OGC_GEOMETRY', 'OGC_FEATURE_LIMIT', 'OGC_COORDINATE_LIMIT'].includes(error?.code)
+        || error?.message === 'source unavailable') return sendJson(res, 502, { error: 'regional source returned invalid data' });
       // Normalizer errors are intentionally collapsed with malformed payloads.
       if (error?.message?.includes('payload must contain') || error?.message?.includes('Unknown regional source')) {
         return sendJson(res, 502, { error: 'regional source returned invalid data' });

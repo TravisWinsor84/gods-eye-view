@@ -205,3 +205,26 @@
   sensor snapshot, confirmed deterministic capped membership and duplicate
   sensor resolution, and found no remaining provider-key exposure or product
   regression. Task 3 is closed; no push or deployment occurred.
+- Task 4 implementation adds fixed DEA/DataVic WFS 2.0 adapters for DEA
+  three-day hotspots, Victorian parks, recreation tracks and heritage. Browser
+  input remains source ID plus bbox; fixed type/property allow-lists, EPSG:4326,
+  GeoJSON, count/maxFeatures, redirect/media checks, 2 MB streaming reads,
+  feature/coordinate/nesting/topology caps and the shared four-request provider
+  semaphore are enforced. Sanitizers retain only source-safe observation or
+  reference fields and explicit non-warning/non-closure/unknown-cadence caveats.
+- Task 4 RED-first regressions covered missing adapters/routes, live consecutive
+  duplicate park vertices, a bounded 65-polygon heritage feature, exact-cap WFS
+  count metadata, deterministic dedupe/order, invalid/excessive topology,
+  response media/stream caps, finite coordinates, source-local last-good expiry
+  and provider concurrency through body consumption. Focused verification
+  passed 74/74.
+- Task 4 live read-only proxy smoke returned HTTP 200 for all four sources. DEA
+  returned 839 sanitized points from 1,000 rows and honestly reported
+  partial/capped against 2,174 WFS matches with 161 duplicate public projections;
+  parks returned 21 current multipolygons; tracks returned 7 current
+  multilines; heritage returned 250 partial/capped multipolygons against 645 WFS
+  matches. No sensitive or free-text values were copied into evidence.
+- Task 4 full `npm test` passed 2,857 with 0 failures and 1 expected Node-version
+  allocation-benchmark skip; production build passed at 163 modules; `git diff
+  --check` passed. No pack membership, push or deployment occurred; independent
+  review remains the next gate.

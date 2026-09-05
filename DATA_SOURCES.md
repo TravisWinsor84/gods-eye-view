@@ -63,6 +63,10 @@ only after its authenticated contract has been validated.
 | `au-emergency-facilities` | Geoscience Australia, [Emergency Management Facilities ArcGIS service](https://services.ga.gov.au/gis/rest/services/Emergency_Management_Facilities/MapServer) | Creative Commons Attribution 4.0 International; incorporates G-NAF under the G-NAF End User Licence Agreement | `© Commonwealth of Australia (Geoscience Australia) 2023. This material is released under the Creative Commons Attribution 4.0 International Licence. Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.` | Point | Implemented registry, sanitizer and daily viewport proxy; not assigned to a visible category pack until Task 6 |
 | `au-health-facilities` | Geoscience Australia / Healthdirect, [National HealthDirect Health Facilities ArcGIS service](https://services.ga.gov.au/gis/rest/services/National_HealthDirect_Health_Facilities/MapServer) | The live service states Creative Commons Attribution 4.0 International and incorporated G-NAF terms; the Data.gov catalogue licence remains unspecified | `© Commonwealth of Australia (Geoscience Australia) 2025`<br>`This material is released under the Creative Commons Attribution 4.0 International Licence.`<br><br>`Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.` | Point | Implemented registry, sanitizer and daily viewport proxy; periodic reference directory, not assigned to a visible category pack until Task 6 |
 | `au-place-names` | Geoscience Australia, [Composite Gazetteer of Australia ArcGIS service](https://services.ga.gov.au/gis/rest/services/Composite_Gazetteer_of_Australia/MapServer) | Service attribution: Geoscience Australia; compiled reference data | `Geoscience Australia` | Point | Implemented registry, sanitizer and weekly viewport proxy; not assigned to a visible category pack until Task 6 |
+| `au-dea-hotspots` | Geoscience Australia / Digital Earth Australia, [DEA Hotspots WFS](https://hotspots.dea.ga.gov.au/geoserver/wfs), fixed `public:hotspots_three_days` layer | Creative Commons Attribution 4.0 International | `Digital Earth Australia Hotspots` | Point | Implemented five-minute viewport cache over the fixed three-day observation layer; last-good limited to fifteen minutes; satellite observation context only, not warning or evacuation advice; not assigned to a visible category pack until Task 6 |
+| `vic-parks` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:parkres` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Implemented daily viewport cache; reference reserve boundaries with name/type/manager only; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
+| `vic-recreation-tracks` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:recweb_tracks` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Line or multiline | Implemented daily viewport cache; reference alignment only, explicitly not live closure or condition state; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
+| `vic-heritage` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:heritage_register` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Implemented daily viewport cache with unknown publisher cadence; bounded topology-checked simplification; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
 | `melbourne-drinking-fountains` | City of Melbourne, [Drinking Fountains](https://data.melbourne.vic.gov.au/explore/dataset/drinking-fountains/information/) through Explore API v2.1 | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented six-hour viewport cache; publisher source cadence is daily; last-good is limited to three missed daily publisher cycles; inventory only and not assigned to a visible category pack until Task 6 |
 | `melbourne-barbecues` | City of Melbourne, [Public Barbecues](https://data.melbourne.vic.gov.au/explore/dataset/public-barbecues/information/) through Explore API v2.1 | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented six-hour viewport cache; publisher source cadence is daily; last-good is limited to three missed daily publisher cycles; inventory only and not assigned to a visible category pack until Task 6 |
 | `melbourne-parking-live` | City of Melbourne, [On-street Parking Bay Sensors](https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bay-sensors/information/) joined to [On-street Parking Bays](https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bays/information/) through Explore API v2.1 JSON exports | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented provider-wide two-minute cache; bbox filtering follows the server-side join; each observation becomes stale after five minutes; not assigned to a visible category pack until Task 6 |
@@ -91,6 +95,31 @@ IDs, authority IDs, comments, contacts and full street addresses. Partial
 sublayer failures are returned as degraded source status without exposing
 provider errors. These routes are implemented but are not visible in a category
 layer or pack until the explicit Task 6 integration.
+
+The four OGC routes use fixed WFS 2.0 `GetFeature` templates. Each request
+includes an EPSG:4326 bbox and output CRS, GeoJSON output, both the WFS 2
+`count` ceiling and GeoServer's WFS 1-compatible `maxFeatures` ceiling, and a
+source-specific public `propertyName` allow-list. Redirects and non-JSON media
+types fail closed. Response bodies are stream-limited to 2 MB while the shared
+provider-wide semaphore is held; normalization then enforces the source feature
+cap, finite longitude/latitude, exact geometry nesting, 50,000 input coordinates
+per feature and 100,000 per response. Malformed or excessive geometry rejects
+the refresh instead of being cached. Duplicate or wrong-geometry rows are
+removed deterministically and make source status partial rather than current.
+
+DEA output retains observation time and provider-supplied positional uncertainty
+and confidence, but no provider ID, file name or operational free text. Its
+375 m-type satellite-detection caveat explicitly says the layer is observation
+context, not warning or evacuation advice. Parks retain only reserve name, type
+and manager. Recreation tracks retain only name and public classification and
+never expose closure, condition, comments or maintenance fields. Heritage keeps
+only site name and heritage-object type, labels publisher cadence unknown, and
+never exposes register/internal IDs or sensitive/free-text fields. Heritage
+polygon input is validated before deterministic reduction to at most 4,000
+coordinates per feature; closed rings, winding order and simple-ring topology
+are revalidated after simplification. A failed refresh uses source-local
+last-good data only inside the catalogue ceiling, otherwise returns a sanitized
+timeout/unavailable/invalid response.
 
 The five Melbourne civic sources use fixed City of Melbourne Explore API v2.1
 requests and strict public-field allow-lists. Offset-paginated datasets use

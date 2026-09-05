@@ -22,6 +22,10 @@ test('registry declares the approved regional source IDs with immutable source c
     'au-emergency-facilities',
     'au-health-facilities',
     'au-place-names',
+    'au-dea-hotspots',
+    'vic-parks',
+    'vic-recreation-tracks',
+    'vic-heritage',
     'melbourne-drinking-fountains',
     'melbourne-barbecues',
     'melbourne-parking-live',
@@ -42,6 +46,10 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['au-emergency-facilities'].runtimeEligible, true);
   assert.equal(REGIONAL_SOURCES['au-health-facilities'].geometry, 'point');
   assert.equal(REGIONAL_SOURCES['au-place-names'].credential, 'none');
+  assert.equal(REGIONAL_SOURCES['au-dea-hotspots'].geometry, 'point');
+  assert.equal(REGIONAL_SOURCES['vic-parks'].geometry, 'polygon');
+  assert.equal(REGIONAL_SOURCES['vic-recreation-tracks'].geometry, 'line');
+  assert.equal(REGIONAL_SOURCES['vic-heritage'].refresh, 'unknown publisher cadence; daily viewport cache');
   assert.equal(REGIONAL_SOURCES['melbourne-parking-live'].refreshMs, 120_000);
   assert.equal(REGIONAL_SOURCES['melbourne-parking-live'].maxStaleMs, 600_000);
   assert.equal(REGIONAL_SOURCES['melbourne-drinking-fountains'].maxStaleMs, 259_200_000);

@@ -135,6 +135,108 @@ test('regional proxy delegates Melbourne civic sources with only validated sourc
   }]);
 });
 
+test('regional proxy fetches fixed OGC GeoJSON and strips provider IDs and unsafe fields', async () => {
+  let requestedUrl;
+  let requestedOptions;
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input, options) => {
+      requestedUrl = new URL(input);
+      requestedOptions = options;
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature', id: 'internal.99',
+          geometry: { type: 'Point', coordinates: [144.96, -37.81] },
+          properties: { datetime: '2026-09-03T05:48:28Z', accuracy: '± 375 m', confidence: 90, id: 99, comments: 'secret note' },
+        }],
+      });
+    },
+  }), `/api/regional/au-dea-hotspots${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(requestedUrl.origin, 'https://hotspots.dea.ga.gov.au');
+  assert.equal(requestedUrl.searchParams.get('typeName'), 'public:hotspots_three_days');
+  assert.equal(requestedUrl.searchParams.get('bbox'), '144.9,-37.9,145,-37.8,EPSG:4326');
+  assert.equal(requestedOptions.redirect, 'error');
+  assert.match(requestedOptions.headers.Accept, /json/i);
+  assert.equal(response.headers['x-regional-status'], 'fresh');
+  assert.doesNotMatch(response.body, /internal\.99|secret note|"id":99/);
+});
+
+test('regional proxy rejects OGC redirects, non-JSON media and oversized streams with sanitized errors', async () => {
+  const route = `/api/regional/vic-parks${MELBOURNE_BOUNDS}`;
+  const cases = [
+    [new Response('', { status: 302, headers: { location: 'https://attacker.invalid/' } }), 502, 'temporarily unavailable'],
+    [new Response('<html>not json</html>', { status: 200, headers: { 'Content-Type': 'text/html' } }), 502, 'invalid data'],
+    [new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(2_100_000));
+        controller.close();
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }), 502, 'too large'],
+  ];
+  for (const [upstream, status, message] of cases) {
+    const response = await invokeRegional(createRegionalProxy({ fetchImpl: async () => upstream }), route);
+    assert.equal(response.status, status);
+    assert.match(JSON.parse(response.body).error, new RegExp(message));
+    assert.doesNotMatch(response.body, /attacker|not json/);
+  }
+});
+
+test('regional proxy holds the shared four-request semaphore through OGC body consumption', async () => {
+  let active = 0;
+  let maxActive = 0;
+  const middleware = createRegionalProxy({
+    fetchImpl: async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      return new Response(new ReadableStream({
+        async start(controller) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          controller.enqueue(new TextEncoder().encode('{"type":"FeatureCollection","features":[]}'));
+          controller.close();
+          active -= 1;
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+  const responses = await Promise.all([
+    invokeRegional(middleware, `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`),
+    invokeRegional(middleware, `/api/regional/au-dea-hotspots${MELBOURNE_BOUNDS}`),
+    invokeRegional(middleware, `/api/regional/vic-parks${MELBOURNE_BOUNDS}`),
+    invokeRegional(middleware, `/api/regional/vic-heritage${MELBOURNE_BOUNDS}`),
+  ]);
+  assert.deepEqual(responses.map(({ status }) => status), Array(4).fill(200));
+  assert.ok(maxActive <= 4, `expected at most four active provider bodies, observed ${maxActive}`);
+  assert.equal(active, 0);
+});
+
+test('regional proxy serves OGC last-good only inside the source-specific stale ceiling', async () => {
+  let clock = 1_000_000;
+  let fail = false;
+  const middleware = createRegionalProxy({
+    now: () => clock,
+    fetchImpl: async () => {
+      if (fail) throw new Error('private provider failure');
+      return regionalResponseJson({ type: 'FeatureCollection', features: [] });
+    },
+  });
+  const route = `/api/regional/au-dea-hotspots${MELBOURNE_BOUNDS}`;
+  assert.equal((await invokeRegional(middleware, route)).status, 200);
+  fail = true;
+  clock += 300_001;
+  const stale = await invokeRegional(middleware, route);
+  assert.equal(stale.status, 200);
+  assert.equal(stale.headers['x-regional-status'], 'stale');
+  assert.equal(stale.headers['x-regional-cache'], 'STALE');
+
+  clock = 1_900_001;
+  const expired = await invokeRegional(middleware, route);
+  assert.equal(expired.status, 502);
+  assert.deepEqual(JSON.parse(expired.body), { error: 'regional source is temporarily unavailable' });
+  assert.doesNotMatch(expired.body, /private provider failure/);
+});
+
 test('regional proxy maps all-stale civic observations to a degraded header', async () => {
   const response = await invokeRegional(createRegionalProxy({
     melbourneCivicClient: {
