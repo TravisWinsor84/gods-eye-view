@@ -6,6 +6,7 @@ export const REGIONAL_ENTITY_LIMIT = 1_500;
 export const REGIONAL_LABEL_LIMIT = 80;
 export const REGIONAL_MAX_VIEW_SPAN_DEG = 10;
 export const REGIONAL_MAX_CAMERA_HEIGHT_M = 2_000_000;
+const CAMERA_REFRESH_DELAY_MS = 75;
 
 function cleanId(value, fallback) {
   const text = String(value ?? '').trim();
@@ -182,9 +183,11 @@ function addFeature(dataSource, options, maxEntities = Number.POSITIVE_INFINITY)
 }
 
 function sourceError(sourceId, error) {
-  const sourceName = REGIONAL_SOURCES[sourceId]?.source || sourceId;
+  const source = REGIONAL_SOURCES[sourceId];
+  const sourceName = source?.name || sourceId;
+  const publisher = source?.source ? `, ${source.source}` : '';
   const detail = String(error?.message || error || 'unavailable').trim();
-  return `${sourceName}: ${detail}`;
+  return `${sourceName} (${sourceId}${publisher}): ${detail}`;
 }
 
 /** Create one independently managed Cesium layer for a regional source pack. */
@@ -210,6 +213,11 @@ export function createRegionalLayer({
   let enabled = false;
   let destroyed = false;
   let moveEndRemover = null;
+  let cameraRefreshTimer = null;
+  let queuedCameraRefresh = null;
+  let activeUpdate = null;
+  let activeUpdateController = null;
+  let generation = 0;
   let count = 0;
   let lastUpdate = null;
   let status = 'idle';
@@ -255,6 +263,108 @@ export function createRegionalLayer({
     moveEndRemover = null;
   };
 
+  const cancelRefreshWork = () => {
+    generation += 1;
+    if (cameraRefreshTimer !== null) clearTimeout(cameraRefreshTimer);
+    cameraRefreshTimer = null;
+    queuedCameraRefresh = null;
+    activeUpdateController?.abort();
+  };
+
+  const runUpdate = (viewer, externalSignal = null) => {
+    if (destroyed || !enabled || !dataSource) return Promise.resolve(false);
+    if (activeUpdate) return activeUpdate;
+
+    const updateGeneration = generation;
+    const controller = new AbortController();
+    activeUpdateController = controller;
+    const abortFromExternal = () => controller.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) abortFromExternal();
+    else externalSignal?.addEventListener?.('abort', abortFromExternal, { once: true });
+
+    const updatePromise = (async () => {
+      const bounds = activeViewport(viewer);
+      if (!bounds) {
+        if (updateGeneration !== generation || destroyed || !enabled || !dataSource) return false;
+        errorsBySource.clear();
+        render(viewer);
+        return true;
+      }
+
+      let results;
+      try {
+        results = await Promise.all(sources.map(async (sourceId) => {
+          try {
+            const response = await fetch(proxyUrl(sourceId, bounds), {
+              method: 'GET',
+              headers: { Accept: 'application/json' },
+              signal: controller.signal,
+            });
+            if (!response?.ok) throw new Error(`HTTP ${response?.status ?? '?'}`);
+            const body = await response.json();
+            if (body?.type !== 'FeatureCollection' || !Array.isArray(body.features)) {
+              throw new Error('invalid regional response');
+            }
+            return { sourceId, body };
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            return { sourceId, error };
+          }
+        }));
+      } catch (error) {
+        if (updateGeneration !== generation || destroyed || !enabled || !dataSource) return false;
+        throw error;
+      }
+
+      if (updateGeneration !== generation || destroyed || !enabled || !dataSource) return false;
+      let successful = 0;
+      for (const result of results) {
+        if (result.error) {
+          errorsBySource.set(result.sourceId, sourceError(result.sourceId, result.error));
+          continue;
+        }
+        successful += 1;
+        lastGoodBySource.set(result.sourceId, result.body);
+        errorsBySource.delete(result.sourceId);
+      }
+      if (successful > 0) lastUpdate = Date.now();
+      render(viewer);
+      return successful > 0 || lastGoodBySource.size > 0;
+    })();
+
+    activeUpdate = updatePromise.finally(() => {
+      externalSignal?.removeEventListener?.('abort', abortFromExternal);
+      if (activeUpdate !== wrappedUpdate) return;
+      activeUpdate = null;
+      activeUpdateController = null;
+      const queued = queuedCameraRefresh;
+      queuedCameraRefresh = null;
+      if (queued && queued.generation === generation && enabled && !destroyed && dataSource) {
+        queueMicrotask(() => {
+          if (queued.generation === generation && enabled && !destroyed && dataSource) {
+            void runUpdate(queued.viewer).catch(() => {});
+          }
+        });
+      }
+    });
+    const wrappedUpdate = activeUpdate;
+    return wrappedUpdate;
+  };
+
+  const scheduleCameraRefresh = (viewer) => {
+    if (cameraRefreshTimer !== null) clearTimeout(cameraRefreshTimer);
+    const scheduledGeneration = generation;
+    cameraRefreshTimer = setTimeout(() => {
+      cameraRefreshTimer = null;
+      if (scheduledGeneration !== generation || destroyed || !enabled || !dataSource) return;
+      if (activeUpdate) {
+        queuedCameraRefresh = { viewer, generation: scheduledGeneration };
+        return;
+      }
+      void runUpdate(viewer).catch(() => {});
+    }, CAMERA_REFRESH_DELAY_MS);
+  };
+
   return {
     id,
     name,
@@ -285,55 +395,22 @@ export function createRegionalLayer({
       enabled = true;
       dataSource.show = true;
       if (!moveEndRemover) {
-        moveEndRemover = viewer.camera.moveEnd.addEventListener(() => render(viewer));
+        moveEndRemover = viewer.camera.moveEnd.addEventListener(() => {
+          render(viewer);
+          scheduleCameraRefresh(viewer);
+        });
       }
       render(viewer);
       return true;
     },
 
     async update(viewer, { signal = null } = {}) {
-      if (destroyed || !enabled || !dataSource) return false;
-      const bounds = activeViewport(viewer);
-      if (!bounds) {
-        errorsBySource.clear();
-        render(viewer);
-        return true;
-      }
-      const results = await Promise.all(sources.map(async (sourceId) => {
-        try {
-          const response = await fetch(proxyUrl(sourceId, bounds), {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-            signal,
-          });
-          if (!response?.ok) throw new Error(`HTTP ${response?.status ?? '?'}`);
-          const body = await response.json();
-          if (body?.type !== 'FeatureCollection' || !Array.isArray(body.features)) {
-            throw new Error('invalid regional response');
-          }
-          return { sourceId, body };
-        } catch (error) {
-          if (signal?.aborted) throw error;
-          return { sourceId, error };
-        }
-      }));
-      let successful = 0;
-      for (const result of results) {
-        if (result.error) {
-          errorsBySource.set(result.sourceId, sourceError(result.sourceId, result.error));
-          continue;
-        }
-        successful += 1;
-        lastGoodBySource.set(result.sourceId, result.body);
-        errorsBySource.delete(result.sourceId);
-      }
-      if (successful > 0) lastUpdate = Date.now();
-      render(viewer);
-      return successful > 0 || lastGoodBySource.size > 0;
+      return runUpdate(viewer, signal);
     },
 
     async disable(viewer) {
       enabled = false;
+      cancelRefreshWork();
       detachCamera();
       if (dataSource) dataSource.show = false;
       status = 'idle';
@@ -345,6 +422,7 @@ export function createRegionalLayer({
       if (destroyed) return true;
       enabled = false;
       destroyed = true;
+      cancelRefreshWork();
       detachCamera();
       if (dataSource) viewer?.dataSources?.remove?.(dataSource, true);
       dataSource = null;

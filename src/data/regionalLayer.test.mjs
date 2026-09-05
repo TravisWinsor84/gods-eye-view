@@ -29,6 +29,24 @@ function response(features, status = 200) {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitFor(predicate, message = 'condition was not met') {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) assert.fail(message);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 function eventSlot() {
   const listeners = new Set();
   return {
@@ -100,7 +118,7 @@ test('uses one clustered CustomDataSource and only the regional proxy route', as
   assert.doesNotMatch(urls[0], /^https?:/);
 });
 
-test('retains each source last-good cohort and names a failed source honestly', async () => {
+test('retains each source last-good cohort and uniquely names a failed DataVic source', async () => {
   const { viewer, added } = viewerStub();
   const layer = createRegionalLayer({
     id: 'regional-victoria',
@@ -115,9 +133,11 @@ test('retains each source last-good cohort and names a failed source honestly', 
   let refresh = 0;
   await withFetch(async (url) => {
     const sourceId = new URL(String(url), 'http://test').pathname.split('/').at(-1);
-    if (refresh === 1 && sourceId === 'vic-epa-air') throw new Error('offline');
-    if (sourceId === 'vic-epa-air') return response([pointFeature('epa-old', 144.96, -37.81)]);
-    return response([pointFeature(refresh === 0 ? 'fire-old' : 'fire-new', 144.95, -37.82)]);
+    if (refresh === 1 && sourceId === 'vic-fire-context') throw new Error('offline');
+    if (sourceId === 'vic-epa-air') {
+      return response([pointFeature(refresh === 0 ? 'epa-old' : 'epa-new', 144.96, -37.81)]);
+    }
+    return response([pointFeature('fire-old', 144.95, -37.82)]);
   }, async () => {
     assert.equal(await layer.update(viewer), true);
     refresh = 1;
@@ -126,10 +146,11 @@ test('retains each source last-good cohort and names a failed source honestly', 
 
   assert.deepEqual(
     added[0].entities.values.map((entity) => entity.id).sort(),
-    ['vic-epa-air:epa-old', 'vic-fire-context:fire-new'],
+    ['vic-epa-air:epa-new', 'vic-fire-context:fire-old'],
   );
   assert.equal(layer.getStats().count, 2);
-  assert.match(layer.getStats().error, /EPA Victoria/);
+  assert.match(layer.getStats().error, /Victoria Fire Context/);
+  assert.match(layer.getStats().error, /vic-fire-context/);
   assert.match(layer.getStats().error, /offline/);
 });
 
@@ -182,10 +203,11 @@ test('caps expanded MultiPoint rendering at the global entity budget', async () 
   assert.equal(layer.getStats().count, REGIONAL_ENTITY_LIMIT);
 });
 
-test('culls off-viewport records and re-culls the last-good cohort on camera movement', async () => {
+test('immediately re-culls then coalesces camera moves into one refresh for the new bbox', async () => {
   let rectangle = Cesium.Rectangle.fromDegrees(144.8, -37.9, 145.0, -37.7);
   const fixture = viewerStub();
   fixture.viewer.camera.computeViewRectangle = () => rectangle;
+  const urls = [];
   const layer = createRegionalLayer({
     id: 'regional-melbourne',
     sourceIds: ['melbourne-places'],
@@ -195,16 +217,112 @@ test('culls off-viewport records and re-culls the last-good cohort on camera mov
   });
   await layer.init(fixture.viewer);
   await layer.enable(fixture.viewer);
-  await withFetch(async () => response([
-    pointFeature('inside', 144.96, -37.81),
-    pointFeature('outside', 146.0, -38.5),
-  ]), () => layer.update(fixture.viewer));
+  await withFetch(async (url) => {
+    urls.push(String(url));
+    return response(urls.length === 1
+      ? [pointFeature('inside', 144.96, -37.81)]
+      : [pointFeature('outside', 146.0, -38.5)]);
+  }, async () => {
+    await layer.update(fixture.viewer);
+    assert.deepEqual(fixture.added[0].entities.values.map((entity) => entity.id), ['melbourne-places:inside']);
 
-  assert.deepEqual(fixture.added[0].entities.values.map((entity) => entity.id), ['melbourne-places:inside']);
-  rectangle = Cesium.Rectangle.fromDegrees(145.9, -38.6, 146.1, -38.4);
-  fixture.moveEnd.raise();
-  assert.deepEqual(fixture.added[0].entities.values.map((entity) => entity.id), ['melbourne-places:outside']);
+    rectangle = Cesium.Rectangle.fromDegrees(145.9, -38.6, 146.1, -38.4);
+    fixture.moveEnd.raise();
+    fixture.moveEnd.raise();
+    fixture.moveEnd.raise();
+    assert.deepEqual(fixture.added[0].entities.values.map((entity) => entity.id), []);
+
+    await waitFor(() => urls.length === 2, 'camera move did not issue a second request');
+    await waitFor(
+      () => fixture.added[0].entities.values.some((entity) => entity.id === 'melbourne-places:outside'),
+      'new-bounds response was not rendered',
+    );
+  });
+
+  const movedUrl = new URL(urls[1], 'http://test');
+  assert.equal(movedUrl.pathname, '/api/regional/melbourne-places');
+  assert.deepEqual(Object.fromEntries(movedUrl.searchParams), {
+    west: '145.9',
+    south: '-38.6',
+    east: '146.1',
+    north: '-38.4',
+  });
+  assert.equal(urls.length, 2);
 });
+
+test('disable cancels scheduled and in-flight camera refresh work', async () => {
+  let rectangle = Cesium.Rectangle.fromDegrees(144.8, -37.9, 145.0, -37.7);
+  const fixture = viewerStub();
+  fixture.viewer.camera.computeViewRectangle = () => rectangle;
+  const layer = createRegionalLayer({
+    id: 'regional-melbourne',
+    sourceIds: ['melbourne-places'],
+  });
+  const cameraResponse = deferred();
+  let fetches = 0;
+  await layer.init(fixture.viewer);
+  await layer.enable(fixture.viewer);
+
+  await withFetch(async () => {
+    fetches += 1;
+    if (fetches === 1) return response([pointFeature('initial', 144.96, -37.81)]);
+    return cameraResponse.promise;
+  }, async () => {
+    await layer.update(fixture.viewer);
+    const initialLastUpdate = layer.getStats().lastUpdate;
+    rectangle = Cesium.Rectangle.fromDegrees(145.9, -38.6, 146.1, -38.4);
+    fixture.moveEnd.raise();
+    await waitFor(() => fetches === 2, 'camera refresh did not start');
+    await layer.disable(fixture.viewer);
+    cameraResponse.resolve(response([pointFeature('late', 146.0, -38.5)]));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(layer.getStats().lastUpdate, initialLastUpdate);
+    assert.equal(layer.getStats().status, 'idle');
+    assert.equal(fixture.moveEnd.size, 0);
+    assert.deepEqual(fixture.added[0].entities.values.map((entity) => entity.id), []);
+  });
+
+  await layer.enable(fixture.viewer);
+  fixture.moveEnd.raise();
+  await layer.disable(fixture.viewer);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(fetches, 2);
+});
+
+for (const outcome of ['resolution', 'rejection']) {
+  test(`destroy prevents deferred fetch ${outcome} from repopulating layer state`, async () => {
+    const fixture = viewerStub();
+    const layer = createRegionalLayer({
+      id: 'regional-melbourne',
+      sourceIds: ['melbourne-places'],
+    });
+    const pending = deferred();
+    await layer.init(fixture.viewer);
+    await layer.enable(fixture.viewer);
+
+    await withFetch(async () => pending.promise, async () => {
+      const updatePromise = layer.update(fixture.viewer);
+      await layer.destroy(fixture.viewer);
+      if (outcome === 'resolution') {
+        pending.resolve(response([pointFeature('late', 144.96, -37.81)]));
+      } else {
+        pending.reject(new Error('late failure'));
+      }
+      assert.equal(await updatePromise, false);
+    });
+
+    assert.equal(fixture.moveEnd.size, 0);
+    assert.deepEqual(fixture.added[0].entities.values, []);
+    assert.deepEqual(layer.getStats(), {
+      count: 0,
+      lastUpdate: null,
+      error: null,
+      status: 'idle',
+      sourceErrors: {},
+    });
+  });
+}
 
 test('zoom culling avoids browser fetches and reports guidance instead of a feed error', async () => {
   const { viewer, added } = viewerStub({
