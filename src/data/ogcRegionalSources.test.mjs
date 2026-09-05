@@ -187,6 +187,38 @@ test('preserves all 1410 flood rings and coordinates for a live-scale bounded fe
   assert.equal(result.sourceStatus.status, 'partial');
 });
 
+test('flood geometry still rejects a self-intersecting ring', () => {
+  const bowTie = [[144, -38], [145, -37], [144, -37], [145, -38], [144, -38]];
+  assert.throws(() => normalizeOgcPayload('vic-flood-history-2022', {
+    type: 'FeatureCollection', numberMatched: 1, numberReturned: 1,
+    features: [feature({ type: 'MultiPolygon', coordinates: [[bowTie]] }, { label: 'Invalid flood ring' })],
+  }, { maxFeatures: 1 }), /no valid features/i);
+});
+
+test('flood geometry intentionally tolerates inter-ring overlap within its bounded historical contract', () => {
+  const shell = [[144, -38], [146, -38], [146, -36], [144, -36], [144, -38]];
+  const overlappingA = [[144.2, -37.8], [145.2, -37.8], [145.2, -36.8], [144.2, -36.8], [144.2, -37.8]];
+  const overlappingB = [[144.8, -37.4], [145.8, -37.4], [145.8, -36.4], [144.8, -36.4], [144.8, -37.4]];
+  const result = normalizeOgcPayload('vic-flood-history-2022', {
+    type: 'FeatureCollection', numberMatched: 1, numberReturned: 1,
+    features: [feature({ type: 'MultiPolygon', coordinates: [[shell, overlappingA, overlappingB]] }, { label: 'Historical overlap' })],
+  }, { maxFeatures: 1 });
+  assert.equal(result.features.length, 1);
+  assert.equal(result.features[0].geometry.coordinates[0].length, 3);
+});
+
+test('flood geometry rejects 2001 rings even below the coordinate ceiling', () => {
+  const rings = Array.from({ length: 2_001 }, (_, index) => {
+    const x = 140 + (index % 100) * 0.001;
+    const y = -39 + Math.floor(index / 100) * 0.001;
+    return [[x, y], [x + 0.0004, y], [x + 0.0004, y + 0.0004], [x, y + 0.0004], [x, y]];
+  });
+  assert.throws(() => normalizeOgcPayload('vic-flood-history-2022', {
+    type: 'FeatureCollection', numberMatched: 1, numberReturned: 1,
+    features: [feature({ type: 'MultiPolygon', coordinates: [rings] }, { label: 'Too many rings' })],
+  }, { maxFeatures: 1 }), /no valid features/i);
+});
+
 test('hotspots retain observation uncertainty and confidence without IDs or safety-of-life claims', () => {
   const normalized = normalizeOgcFeature('au-dea-hotspots', feature(
     { type: 'Point', coordinates: [144.96, -37.81] },
