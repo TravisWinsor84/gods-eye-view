@@ -156,3 +156,59 @@ provider IDs or free-text fields were copied into evidence.
   large-chunk advisory was emitted.
 - `git diff --check`: passed before staging.
 - No push or deployment was performed.
+
+## Operational follow-up — per-feature fail-closed recovery
+
+The review-fix smoke above exposed a real operational gap: one invalid heritage
+row caused the complete 250-row response to fail even though the other reference
+features were valid. RED tests first reproduced mixed valid/invalid topology,
+zero valid survivors, cumulative coordinate/nesting limits and proxy behavior.
+The initial focused RED run passed 64/68 and failed the four new recovery
+assertions for the expected old whole-response behavior.
+
+`normalizeOgcPayload()` now omits only feature-local `INVALID_OGC_GEOMETRY`
+failures and counts them in `sourceStatus.invalidFeatures`. Any omission forces
+`sourceStatus.status: partial`; it can never report `current`. A nonempty or
+positively matched response with no valid survivor raises
+`INVALID_OGC_RESPONSE`, so the layer still fails closed rather than presenting
+an empty current result.
+
+The response byte cap, collection shape/count checks, total-coordinate meter,
+nesting limit and topology-comparison meter remain whole-request hard failures.
+The response coordinate and topology meters are shared across feature-local
+exceptions and are never reset by omission. Regression fixtures exhaust both
+meters through multiple invalid rows. Excessive nesting has its own hard
+`OGC_NESTING_LIMIT` classification, and the proxy sanitizes it as invalid source
+data.
+
+Live diagnosis measured 110,230 topology comparisons for the current heritage
+response after row 6 was omitted. The bounded response budget is now 150,000.
+Unchanged heritage geometry is not redundantly topology-validated a second time;
+geometry that is actually simplified is still validated both before and after
+simplification. A live-scale valid workload above the old 100,000 cap and a
+70-invalid-feature cumulative exhaustion attack are both covered.
+
+### Fresh live heritage smoke
+
+The production proxy path returned HTTP 200 with `X-Regional-Status: degraded`.
+It emitted 249 `MultiPolygon` reference features as `partial`/capped against 645
+matches, reported `invalidFeatures: 1`, `duplicateFeatures: 0` and 16,964 input
+coordinates, and emitted zero geometries rejected by an independent second pass
+through the production geometry normalizer. The invalid sibling-polygon row was
+omitted and no invalid geometry was returned.
+
+The final four-source smoke returned HTTP 200 for all sources: DEA 839 points
+(`partial`, capped, 161 duplicates removed, 2,172 matches), parks 21
+multipolygons (`current`), recreation tracks 7 multilines (`current`), and
+heritage 249 multipolygons (`partial`, capped, one invalid omitted, 645 matches).
+
+### Follow-up verification
+
+- Focused Task 4 command: 88 passed, 0 failed, 0 skipped.
+- Full `npm test`: 2,871 passed, 0 failed, 1 expected platform skip. The runner
+  also reported two skipped allocation microbenchmarks because Node 26.8.1 was
+  used while those budgets are calibrated for Node 24.
+- `npm run build`: passed with Vite 6.4.3; 163 modules transformed. The existing
+  large-chunk advisory was emitted.
+- `git diff --check`: passed before staging.
+- No push or deployment was performed.

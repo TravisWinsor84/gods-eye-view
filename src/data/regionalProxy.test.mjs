@@ -164,20 +164,62 @@ test('regional proxy fetches fixed OGC GeoJSON and strips provider IDs and unsaf
 });
 
 test('regional proxy sanitizes exhausted OGC topology validation as invalid provider data', async () => {
-  const shell = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
-  const holes = Array.from({ length: 500 }, (_, index) => {
-    const column = index % 25;
-    const row = Math.floor(index / 25);
-    const west = 0.2 + column * 0.38;
-    const south = 0.2 + row * 0.45;
-    return [[west, south], [west + 0.1, south], [west + 0.1, south + 0.1], [west, south + 0.1], [west, south]];
+  const features = Array.from({ length: 70 }, (_, rowIndex) => {
+    const polygons = Array.from({ length: 65 }, (_, polygonIndex) => {
+      const west = rowIndex * 0.1 + polygonIndex / 10_000;
+      return [[[west, 0], [west + 0.00005, 0], [west + 0.00005, 0.00005], [west, 0]]];
+    });
+    polygons.push(structuredClone(polygons[0]));
+    return {
+      type: 'Feature', geometry: { type: 'MultiPolygon', coordinates: polygons },
+      properties: { name: `Expensive invalid reserve ${rowIndex}` },
+    };
   });
   const response = await invokeRegional(createRegionalProxy({
     fetchImpl: async () => regionalResponseJson({
       type: 'FeatureCollection',
-      features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [shell, ...holes] }, properties: { name: 'Excessive topology work' } }],
+      features,
     }),
   }), '/api/regional/vic-parks?west=0&south=0&east=10&north=10');
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(JSON.parse(response.body), { error: 'regional source returned invalid data' });
+});
+
+test('regional proxy serves valid OGC rows as degraded when invalid topology rows are omitted', async () => {
+  const valid = { type: 'Feature', geometry: {
+    type: 'Polygon', coordinates: [[[144, -38], [146, -38], [146, -37], [144, -37], [144, -38]]],
+  }, properties: { site_name: 'Valid heritage place', heritage_object: 'Building' } };
+  const invalid = { type: 'Feature', geometry: {
+    type: 'MultiPolygon',
+    coordinates: [
+      [[[144, -38], [145, -38], [145, -37], [144, -37], [144, -38]]],
+      [[[144.5, -37.5], [145.5, -37.5], [145.5, -36.5], [144.5, -36.5], [144.5, -37.5]]],
+    ],
+  }, properties: { site_name: 'Invalid sibling polygons' } };
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => regionalResponseJson({
+      type: 'FeatureCollection', numberMatched: 2, numberReturned: 2, features: [invalid, valid],
+    }),
+  }), `/api/regional/vic-heritage${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+  const body = JSON.parse(response.body);
+  assert.deepEqual(body.features.map(({ properties }) => properties.title), ['Valid heritage place']);
+  assert.equal(body.sourceStatus.status, 'partial');
+  assert.equal(body.sourceStatus.invalidFeatures, 1);
+});
+
+test('regional proxy fails closed when a nonempty OGC response has no valid features', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => regionalResponseJson({
+      type: 'FeatureCollection', numberMatched: 1, numberReturned: 1,
+      features: [{ type: 'Feature', geometry: {
+        type: 'Polygon', coordinates: [[[144, -38], [146, -37], [144, -37], [146, -38], [144, -38]]],
+      }, properties: { site_name: 'Invalid self-crossing place' } }],
+    }),
+  }), `/api/regional/vic-heritage${MELBOURNE_BOUNDS}`);
 
   assert.equal(response.status, 502);
   assert.deepEqual(JSON.parse(response.body), { error: 'regional source returned invalid data' });

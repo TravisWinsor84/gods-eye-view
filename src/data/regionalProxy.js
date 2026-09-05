@@ -405,7 +405,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     } catch (error) {
       if (canServeLastGood()) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
       if (error?.code === 'RESPONSE_TOO_LARGE') return sendJson(res, 502, { error: 'regional source response was too large' });
-      if (['INVALID_JSON', 'INVALID_GA_RESPONSE', 'INVALID_MEDIA_TYPE', 'INVALID_OGC_RESPONSE', 'INVALID_OGC_GEOMETRY', 'OGC_FEATURE_LIMIT', 'OGC_COORDINATE_LIMIT', 'OGC_TOPOLOGY_LIMIT'].includes(error?.code)
+      if (['INVALID_JSON', 'INVALID_GA_RESPONSE', 'INVALID_MEDIA_TYPE', 'INVALID_OGC_RESPONSE', 'INVALID_OGC_GEOMETRY', 'OGC_FEATURE_LIMIT', 'OGC_COORDINATE_LIMIT', 'OGC_NESTING_LIMIT', 'OGC_TOPOLOGY_LIMIT'].includes(error?.code)
         || error?.message === 'source unavailable') return sendJson(res, 502, { error: 'regional source returned invalid data' });
       // Normalizer errors are intentionally collapsed with malformed payloads.
       if (error?.message?.includes('payload must contain') || error?.message?.includes('Unknown regional source')) {

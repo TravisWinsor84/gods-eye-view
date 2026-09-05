@@ -243,3 +243,24 @@
   passed, 0 failed and 1 expected skip, plus two Node-24-calibrated allocation
   microbenchmarks skipped under Node 26.8.1; production build passed with 163
   modules transformed and the existing large-chunk advisory.
+- Task 4 operational follow-up adds bounded per-feature fail-closed recovery.
+  Feature-local invalid geometry/topology is omitted, counted in
+  `sourceStatus.invalidFeatures` and always forces `partial`; a nonempty matched
+  response with no valid survivor fails the layer. Byte, collection/count,
+  nesting, total-coordinate and shared topology-budget failures remain fatal,
+  including cumulative work across many omitted invalid rows.
+- Current heritage requires 110,230 topology comparisons after its invalid row
+  is omitted. The bounded response cap is 150,000, and unchanged heritage
+  geometry avoids a redundant second topology pass while actually simplified
+  geometry remains validated before and after simplification.
+- Fresh live heritage smoke returned HTTP 200/degraded with 249 validated
+  multipolygons, `partial`/capped against 645 matches, one invalid feature
+  omitted and zero invalid emitted geometries. The four-source smoke returned
+  HTTP 200 for DEA (839 partial/capped points), parks (21 current
+  multipolygons), tracks (7 current multilines) and heritage (249 partial
+  multipolygons).
+- Follow-up verification passed: focused 88/88; full `npm test` 2,871 passed,
+  0 failed and 1 expected platform skip, plus two Node-24-calibrated allocation
+  microbenchmarks skipped under Node 26.8.1; production build passed with 163
+  modules transformed and the existing large-chunk advisory. No push or
+  deployment occurred.

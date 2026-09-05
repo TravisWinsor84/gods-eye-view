@@ -109,15 +109,15 @@ test('normalization rejects excessive or invalid geometry and never reads beyond
   assert.throws(() => normalizeOgcPayload('vic-parks', {
     type: 'FeatureCollection',
     features: [feature({ type: 'Polygon', coordinates: [[[[144, -38]]]] }, { name: 'Bad nesting' })],
-  }, { maxFeatures: 10 }), /invalid OGC geometry/);
+  }, { maxFeatures: 10 }), (error) => error?.code === 'INVALID_OGC_RESPONSE');
   assert.throws(() => normalizeOgcPayload('vic-heritage', {
     type: 'FeatureCollection',
     features: [feature({ type: 'Polygon', coordinates: [[[[[[144, -38]]]]]] }, { site_name: 'Too deep' })],
-  }, { maxFeatures: 10 }), /invalid OGC geometry nesting/);
+  }, { maxFeatures: 10 }), (error) => error?.code === 'OGC_NESTING_LIMIT');
   assert.throws(() => normalizeOgcPayload('vic-parks', {
     type: 'FeatureCollection',
     features: [feature({ type: 'Polygon', coordinates: [[[144, -38], [Infinity, -38], [146, -37], [144, -38]]] }, { name: 'Bad coordinate' })],
-  }, { maxFeatures: 10 }), /invalid OGC geometry/);
+  }, { maxFeatures: 10 }), (error) => error?.code === 'INVALID_OGC_RESPONSE');
 
   const rows = [feature(POLYGON, { name: 'One' })];
   Object.defineProperty(rows, 1, { enumerable: true, get() { throw new Error('feature beyond cap was read'); } });
@@ -146,7 +146,7 @@ test('heritage simplification stays bounded, closed and deterministic while inva
     type: 'FeatureCollection', features: [feature({
       type: 'Polygon', coordinates: [[[144, -38], [145, -37], [144, -37], [145, -38], [144, -38]]],
     }, { site_name: 'Self crossing' })],
-  }, { maxFeatures: 10 }), /invalid OGC geometry/);
+  }, { maxFeatures: 10 }), (error) => error?.code === 'INVALID_OGC_RESPONSE');
 });
 
 test('rejects polygon holes outside or crossing the shell', () => {
@@ -215,19 +215,21 @@ test('rejects heritage topology that becomes invalid only after simplification',
   }, { site_name: 'Topology-changing simplification' })), /invalid OGC polygon topology/);
 });
 
-test('rejects polygon relationship validation when its bounded comparison budget is exceeded', () => {
-  const shell = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
-  const holes = Array.from({ length: 500 }, (_, index) => {
-    const column = index % 25;
-    const row = Math.floor(index / 25);
-    const west = 0.2 + column * 0.38;
-    const south = 0.2 + row * 0.45;
-    return [[west, south], [west + 0.1, south], [west + 0.1, south + 0.1], [west, south + 0.1], [west, south]];
+test('keeps one topology-comparison budget across many omitted invalid features', () => {
+  const rows = Array.from({ length: 70 }, (_, rowIndex) => {
+    const polygons = Array.from({ length: 65 }, (_, polygonIndex) => {
+      const west = 140 + rowIndex * 0.1 + polygonIndex / 10_000;
+      return [[[west, -38], [west + 0.00005, -38], [west + 0.00005, -37.99995], [west, -38]]];
+    });
+    polygons.push(structuredClone(polygons[0]));
+    return feature({ type: 'MultiPolygon', coordinates: polygons }, {
+      name: `Expensive invalid reserve ${rowIndex}`,
+    });
   });
 
-  assert.throws(() => normalizeOgcFeature('vic-parks', feature({
-    type: 'Polygon', coordinates: [shell, ...holes],
-  }, { name: 'Excessive topology work' })), (error) => error?.code === 'OGC_TOPOLOGY_LIMIT');
+  assert.throws(() => normalizeOgcPayload('vic-parks', {
+    type: 'FeatureCollection', features: rows,
+  }, { maxFeatures: rows.length }), (error) => error?.code === 'OGC_TOPOLOGY_LIMIT');
 });
 
 test('accepts bounded provider geometry with duplicate consecutive vertices or 65 polygons', () => {
@@ -261,6 +263,87 @@ test('deduplicates and orders sanitized features deterministically with partial 
   assert.equal(left.sourceStatus.invalidFeatures, 1);
   assert.equal(left.sourceStatus.duplicateFeatures, 1);
   assert.doesNotMatch(JSON.stringify(left), /internal-a|internal-b/);
+});
+
+test('omits feature-local invalid geometry and topology while retaining valid rows as partial', () => {
+  const valid = feature(POLYGON, { site_name: 'Valid heritage place', heritage_object: 'Building' });
+  const selfCrossing = feature({
+    type: 'Polygon', coordinates: [[[144, -38], [146, -37], [144, -37], [146, -38], [144, -38]]],
+  }, { site_name: 'Invalid self-crossing place' });
+  const overlappingSiblings = feature({
+    type: 'MultiPolygon',
+    coordinates: [
+      [[[144, -38], [145, -38], [145, -37], [144, -37], [144, -38]]],
+      [[[144.5, -37.5], [145.5, -37.5], [145.5, -36.5], [144.5, -36.5], [144.5, -37.5]]],
+    ],
+  }, { site_name: 'Invalid sibling polygons' });
+
+  const result = normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', numberMatched: 3, numberReturned: 3,
+    features: [selfCrossing, valid, overlappingSiblings],
+  }, { maxFeatures: 10 });
+
+  assert.deepEqual(result.features.map(({ properties }) => properties.title), ['Valid heritage place']);
+  assert.equal(result.sourceStatus.status, 'partial');
+  assert.equal(result.sourceStatus.invalidFeatures, 2);
+  assert.equal(result.sourceStatus.numberMatched, 3);
+});
+
+test('fails a nonempty matched response when no valid OGC features remain', () => {
+  const invalid = feature({
+    type: 'Polygon', coordinates: [[[144, -38], [146, -37], [144, -37], [146, -38], [144, -38]]],
+  }, { site_name: 'Invalid self-crossing place' });
+
+  assert.throws(() => normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', numberMatched: 1, numberReturned: 1, features: [invalid],
+  }, { maxFeatures: 10 }), (error) => error?.code === 'INVALID_OGC_RESPONSE');
+  assert.throws(() => normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', numberMatched: 1, numberReturned: 0, features: [],
+  }, { maxFeatures: 10 }), (error) => error?.code === 'INVALID_OGC_RESPONSE');
+
+  const empty = normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', numberMatched: 0, numberReturned: 0, features: [],
+  }, { maxFeatures: 10 });
+  assert.equal(empty.sourceStatus.status, 'current');
+});
+
+test('keeps response-wide coordinate and nesting exhaustion fatal across invalid features', () => {
+  const invalidLongLine = (offset) => feature({
+    type: 'LineString',
+    coordinates: [
+      ...Array.from({ length: 34_000 }, (_, index) => [144 + offset + index / 1_000_000, -37.8]),
+      [Number.NaN, -37.8],
+    ],
+  }, { name: `Invalid long track ${offset}` });
+  assert.throws(() => normalizeOgcPayload('vic-recreation-tracks', {
+    type: 'FeatureCollection', features: [invalidLongLine(0), invalidLongLine(0.01), invalidLongLine(0.02)],
+  }, { maxFeatures: 10 }), (error) => error?.code === 'OGC_COORDINATE_LIMIT');
+
+  const valid = feature(POLYGON, { site_name: 'Valid heritage place' });
+  const tooDeep = feature({
+    type: 'Polygon', coordinates: [[[[[[144, -38]]]]]],
+  }, { site_name: 'Excessively nested place' });
+  assert.throws(() => normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', features: [valid, tooDeep],
+  }, { maxFeatures: 10 }), (error) => error?.code === 'OGC_NESTING_LIMIT');
+});
+
+test('admits a live-scale bounded heritage collection without redundant topology validation', () => {
+  const rows = Array.from({ length: 45 }, (_, rowIndex) => {
+    const polygons = Array.from({ length: 65 }, (_, polygonIndex) => {
+      const west = 140 + rowIndex * 0.1 + polygonIndex / 10_000;
+      return [[[west, -38], [west + 0.00005, -38], [west + 0.00005, -37.99995], [west, -38]]];
+    });
+    return feature({ type: 'MultiPolygon', coordinates: polygons }, {
+      site_name: `Valid bounded heritage place ${rowIndex}`,
+    });
+  });
+
+  const result = normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', numberMatched: rows.length, numberReturned: rows.length, features: rows,
+  }, { maxFeatures: rows.length });
+  assert.equal(result.features.length, rows.length);
+  assert.equal(result.sourceStatus.status, 'current');
 });
 
 test('marks an exact-count WFS response partial when collection metadata reports more matches', () => {

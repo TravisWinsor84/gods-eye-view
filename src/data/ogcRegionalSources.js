@@ -6,7 +6,7 @@ const MAX_GEOMETRY_DEPTH = 4;
 const MAX_HERITAGE_OUTPUT_COORDINATES = 4_000;
 const MAX_POLYGONS_PER_FEATURE = 256;
 const MAX_RINGS_PER_FEATURE = 512;
-const MAX_TOPOLOGY_COMPARISONS = 100_000;
+const MAX_TOPOLOGY_COMPARISONS = 150_000;
 
 export const OGC_MAX_RESPONSE_BYTES = 2_000_000;
 
@@ -117,8 +117,11 @@ function position(value, meter) {
   }
   meter.feature += 1;
   meter.response += 1;
-  if (meter.feature > MAX_INPUT_COORDINATES_PER_FEATURE || meter.response > MAX_INPUT_COORDINATES_PER_RESPONSE) {
+  if (meter.response > MAX_INPUT_COORDINATES_PER_RESPONSE) {
     throw codedError('OGC geometry coordinate limit exceeded', 'OGC_COORDINATE_LIMIT');
+  }
+  if (meter.feature > MAX_INPUT_COORDINATES_PER_FEATURE) {
+    throw codedError('invalid OGC feature coordinate count', 'INVALID_OGC_GEOMETRY');
   }
   return [longitude, latitude];
 }
@@ -338,7 +341,7 @@ function assertGeometryNesting(coordinates) {
     if (!Array.isArray(value)) continue;
     arrayCount += 1;
     if (depth > MAX_GEOMETRY_DEPTH || arrayCount > MAX_INPUT_COORDINATES_PER_RESPONSE) {
-      throw codedError('invalid OGC geometry nesting', 'INVALID_OGC_GEOMETRY');
+      throw codedError('invalid OGC geometry nesting', 'OGC_NESTING_LIMIT');
     }
     for (let index = 0; index < value.length; index += 1) {
       if (Array.isArray(value[index])) stack.push({ value: value[index], depth: depth + 1 });
@@ -366,7 +369,7 @@ function simplifyRing(ringValue, limit, budget) {
 function simplifyHeritagePolygons(polygons, budget) {
   const rings = polygons.flat();
   if (rings.length > MAX_RINGS_PER_FEATURE || rings.length * 4 > MAX_HERITAGE_OUTPUT_COORDINATES) {
-    throw codedError('OGC heritage geometry is excessive', 'OGC_COORDINATE_LIMIT');
+    throw codedError('invalid OGC heritage geometry size', 'INVALID_OGC_GEOMETRY');
   }
   const current = rings.reduce((sum, item) => sum + item.length, 0);
   if (current <= MAX_HERITAGE_OUTPUT_COORDINATES) return polygons;
@@ -396,19 +399,20 @@ function normalizeGeometry(sourceId, geometry, meter) {
   }
   const rawPolygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
   if (!Array.isArray(rawPolygons) || !rawPolygons.length || rawPolygons.length > MAX_POLYGONS_PER_FEATURE) {
-    throw codedError('invalid OGC geometry nesting', 'INVALID_OGC_GEOMETRY');
+    throw codedError('invalid OGC polygon geometry', 'INVALID_OGC_GEOMETRY');
   }
   let ringCount = 0;
   let polygons = rawPolygons.map((polygon) => {
     if (!Array.isArray(polygon) || !polygon.length) throw codedError('invalid OGC geometry nesting', 'INVALID_OGC_GEOMETRY');
     ringCount += polygon.length;
-    if (ringCount > MAX_RINGS_PER_FEATURE) throw codedError('OGC geometry ring limit exceeded', 'OGC_COORDINATE_LIMIT');
+    if (ringCount > MAX_RINGS_PER_FEATURE) throw codedError('invalid OGC geometry ring count', 'INVALID_OGC_GEOMETRY');
     return polygon.map((item) => ring(item, meter));
   });
   validatePolygonTopology(polygons, meter.topology);
   if (sourceId === 'vic-heritage') {
-    polygons = simplifyHeritagePolygons(polygons, meter.topology);
-    validatePolygonTopology(polygons, meter.topology);
+    const simplified = simplifyHeritagePolygons(polygons, meter.topology);
+    if (simplified !== polygons) validatePolygonTopology(simplified, meter.topology);
+    polygons = simplified;
   }
   return {
     type: geometry.type,
@@ -530,7 +534,14 @@ export function normalizeOgcPayload(sourceId, payload, { maxFeatures = MAX_FEATU
   let invalidFeatures = 0;
   let duplicateFeatures = 0;
   for (let index = 0; index < payload.features.length; index += 1) {
-    const normalized = normalizedFeature(sourceId, payload.features[index], meter);
+    let normalized;
+    try {
+      normalized = normalizedFeature(sourceId, payload.features[index], meter);
+    } catch (error) {
+      if (error?.code !== 'INVALID_OGC_GEOMETRY') throw error;
+      invalidFeatures += 1;
+      continue;
+    }
     if (!normalized) { invalidFeatures += 1; continue; }
     if (byIdentity.has(normalized.identity)) duplicateFeatures += 1;
     else byIdentity.set(normalized.identity, normalized.feature);
@@ -543,6 +554,9 @@ export function normalizeOgcPayload(sourceId, payload, { maxFeatures = MAX_FEATU
     return { ...value, id: count === 1 ? baseId : `${baseId}-${count}` };
   });
   features.sort((left, right) => left.properties.title.localeCompare(right.properties.title) || left.id.localeCompare(right.id));
+  if (features.length === 0 && (payload.features.length > 0 || (matchedCandidate !== null && matchedCandidate > 0))) {
+    throw codedError('OGC response contained no valid features', 'INVALID_OGC_RESPONSE');
+  }
   const partial = capped || invalidFeatures > 0 || duplicateFeatures > 0;
   return {
     type: 'FeatureCollection', features,
