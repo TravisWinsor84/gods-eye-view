@@ -82,6 +82,7 @@ function pageRequest(sourceId, layer, bbox, remaining, offset) {
 
   return Object.freeze({
     layer,
+    offset,
     url,
     requestedCount: Math.min(PAGE_SIZE, remaining),
     nextPage(nextOffset, nextRemaining) {
@@ -217,19 +218,44 @@ export function normalizeGaRegionalPayload(sourceId, payloads) {
   let capped = false;
   for (const layer of source.layers) {
     const entry = byLayer.get(layer);
-    if (!entry || entry.error) {
-      layers.push({ layer, type: LAYER_TYPES[sourceId][layer], status: 'unavailable', featureCount: 0 });
+    const retainedFeatures = Array.isArray(entry?.payloads)
+      && entry.payloads.some((payload) => Array.isArray(payload?.features) && payload.features.length > 0);
+    if (!entry || (entry.error && !retainedFeatures)) {
+      layers.push({
+        layer,
+        type: LAYER_TYPES[sourceId][layer],
+        status: 'unavailable',
+        featureCount: 0,
+        ...(entry?.error ? { error: 'upstream-unavailable' } : {}),
+      });
       continue;
     }
     if (!Array.isArray(entry.payloads) || entry.payloads.length > 2) {
       throw new Error(`${sourceId} layer ${layer} must contain bounded payload pages`);
     }
-    let featureCount = 0;
     for (const payload of entry.payloads) {
       if (!Array.isArray(payload?.features)) throw new Error(`${sourceId} layer ${layer} payload must contain a features array`);
+    }
+    if (features.length >= MAX_FEATURES && (entry.truncated || entry.error || entry.payloads.some((payload) => payload.features.length > 0))) {
+      capped = true;
+      layers.push({
+        layer,
+        type: LAYER_TYPES[sourceId][layer],
+        status: 'capped',
+        featureCount: 0,
+        capped: true,
+        unprocessed: true,
+      });
+      continue;
+    }
+    let featureCount = 0;
+    let layerCapped = false;
+    for (let payloadIndex = 0; payloadIndex < entry.payloads.length; payloadIndex += 1) {
+      const payload = entry.payloads[payloadIndex];
       for (let rowIndex = 0; rowIndex < payload.features.length; rowIndex += 1) {
         if (features.length >= MAX_FEATURES) {
           capped = true;
+          layerCapped = true;
           break;
         }
         const row = payload.features[rowIndex];
@@ -239,22 +265,28 @@ export function normalizeGaRegionalPayload(sourceId, payloads) {
         featureCount += 1;
       }
       if (features.length >= MAX_FEATURES) {
-        if (payload.features.length > featureCount || entry.payloads.at(-1) !== payload) capped = true;
+        if (featureCount < payload.features.length || payloadIndex < entry.payloads.length - 1 || entry.truncated) {
+          capped = true;
+          layerCapped = true;
+        }
         break;
       }
     }
     if (entry.truncated) capped = true;
+    const partial = Boolean(entry.truncated || entry.error || layerCapped);
     layers.push({
       layer,
       type: LAYER_TYPES[sourceId][layer],
-      status: entry.truncated ? 'partial' : 'current',
+      status: partial ? 'partial' : 'current',
       featureCount,
+      ...(entry.error ? { error: 'upstream-unavailable' } : {}),
+      ...(layerCapped ? { capped: true } : {}),
     });
   }
 
   const currentCount = layers.filter(({ status }) => status === 'current').length;
   const usableCount = layers.filter(({ status }) => status === 'current' || status === 'partial').length;
-  const status = currentCount === layers.length ? 'current' : usableCount > 0 ? 'partial' : 'unavailable';
+  const status = !capped && currentCount === layers.length ? 'current' : usableCount > 0 ? 'partial' : 'unavailable';
   return {
     type: 'FeatureCollection',
     features,

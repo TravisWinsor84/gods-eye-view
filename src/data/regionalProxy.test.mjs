@@ -156,6 +156,76 @@ test('regional proxy follows bounded ArcGIS pagination without allowing viewport
   assert.doesNotMatch(response.body, /private-id/);
 });
 
+test('regional proxy continues after an empty ArcGIS transfer-limited page', async () => {
+  const offsets = [];
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      const offset = Number(new URL(input).searchParams.get('resultOffset'));
+      offsets.push(offset);
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: offset === 0 ? [] : [gaPoint({ name: 'Recovered Place', authority: 'VIC' })],
+        exceededTransferLimit: offset === 0,
+      });
+    },
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(offsets, [0, 500]);
+  assert.equal(JSON.parse(response.body).features[0].properties.title, 'Recovered Place');
+});
+
+test('regional proxy retains page one when a later page of the same GA layer fails', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      const offset = Number(new URL(input).searchParams.get('resultOffset'));
+      if (offset === 500) return regionalResponseJson({ provider: 'secret page two failure' }, 503);
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: Array.from({ length: 500 }, (_, index) => gaPoint({
+          name: `Retained Place ${index}`,
+          authority: 'VIC',
+        }, 144.9 + index / 100_000)),
+        exceededTransferLimit: true,
+      });
+    },
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+  const body = JSON.parse(response.body);
+  assert.equal(body.features.length, 500);
+  assert.equal(body.features[0].properties.title, 'Retained Place 0');
+  assert.equal(body.sourceStatus.status, 'partial');
+  assert.equal(body.sourceStatus.layers[0].status, 'partial');
+  assert.equal(body.sourceStatus.layers[0].error, 'upstream-unavailable');
+  assert.doesNotMatch(response.body, /secret page two failure/);
+});
+
+test('regional proxy reports a source-wide multi-layer cap as degraded', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      const layer = Number(new URL(input).pathname.match(/MapServer\/(\d+)\/query$/)?.[1]);
+      const count = layer < 2 ? 500 : 1;
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: Array.from({ length: count }, (_, index) => gaPoint({
+          facility_name: `Facility ${layer}-${index}`,
+        }, 144.9 + index / 100_000, -37.8 - layer / 10_000)),
+      });
+    },
+  }), `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+  const body = JSON.parse(response.body);
+  assert.equal(body.sourceStatus.status, 'partial');
+  assert.equal(body.sourceStatus.capped, true);
+  assert.deepEqual(body.sourceStatus.layers.slice(2).map(({ status, unprocessed }) => [status, unprocessed]), [
+    ['capped', true], ['capped', true], ['capped', true], ['capped', true],
+  ]);
+});
+
 test('regional proxy reports GA partial sublayer failure while retaining successful cohorts', async () => {
   const middleware = createRegionalProxy({
     fetchImpl: async (input) => {
@@ -210,6 +280,99 @@ test('regional proxy preserves an all-layer GA timeout as a sanitized 504', asyn
   }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
   assert.equal(response.status, 504);
   assert.deepEqual(JSON.parse(response.body), { error: 'regional source timed out' });
+});
+
+test('regional proxy treats an empty page followed by timeout as no retained GA data', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    timeoutMs: 10,
+    fetchImpl: async (input, { signal }) => {
+      const offset = Number(new URL(input).searchParams.get('resultOffset'));
+      if (offset === 0) {
+        return regionalResponseJson({ type: 'FeatureCollection', features: [], exceededTransferLimit: true });
+      }
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+    },
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 504);
+  assert.deepEqual(JSON.parse(response.body), { error: 'regional source timed out' });
+});
+
+test('regional proxy reports mixed GA timeout and non-timeout failures as unavailable', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    timeoutMs: 10,
+    fetchImpl: async (input, { signal }) => {
+      const layer = Number(new URL(input).pathname.match(/MapServer\/(\d+)\/query$/)?.[1]);
+      if (layer === 0) {
+        return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+      }
+      return regionalResponseJson({ provider: 'secret failure' }, 503);
+    },
+  }), `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(JSON.parse(response.body), { error: 'regional source is temporarily unavailable' });
+  assert.doesNotMatch(response.body, /secret failure|timeout/);
+});
+
+test('regional proxy caps concurrent GA provider fetches at four across fan-out and refreshes', async () => {
+  let active = 0;
+  let maxActive = 0;
+  let calls = 0;
+  const middleware = createRegionalProxy({
+    fetchImpl: async (input) => {
+      active += 1;
+      calls += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      const layer = Number(new URL(input).pathname.match(/MapServer\/(\d+)\/query$/)?.[1]);
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: [gaPoint({ facility_name: `Facility ${layer}` })],
+      });
+    },
+  });
+
+  const responses = await Promise.all([
+    invokeRegional(middleware, `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`),
+    invokeRegional(middleware, '/api/regional/au-emergency-facilities?west=145&south=-37.9&east=145.1&north=-37.8'),
+  ]);
+
+  assert.deepEqual(responses.map(({ status }) => status), [200, 200]);
+  assert.equal(calls, 12);
+  assert.ok(maxActive <= 4, `expected at most four active GA fetches, observed ${maxActive}`);
+});
+
+test('regional proxy releases GA provider capacity after failures and aborts', async () => {
+  let phase = 'fail';
+  let active = 0;
+  let maxActive = 0;
+  const middleware = createRegionalProxy({
+    timeoutMs: 10,
+    fetchImpl: async (input, { signal }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      try {
+        const layer = Number(new URL(input).pathname.match(/MapServer\/(\d+)\/query$/)?.[1]);
+        if (phase === 'fail') {
+          if (layer === 0) return await new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+          throw new Error('provider failure');
+        }
+        return regionalResponseJson({ type: 'FeatureCollection', features: [] });
+      } finally {
+        active -= 1;
+      }
+    },
+  });
+
+  const failed = await invokeRegional(middleware, `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`);
+  phase = 'recover';
+  const recovered = await invokeRegional(middleware, '/api/regional/au-emergency-facilities?west=145&south=-37.9&east=145.1&north=-37.8');
+
+  assert.equal(failed.status, 502);
+  assert.equal(recovered.status, 200);
+  assert.ok(maxActive <= 4);
 });
 
 test('regional proxy enforces byte cap and isolates parser failures', async () => {

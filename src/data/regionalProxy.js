@@ -165,6 +165,21 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
   const inFlight = new Map();
   const transportClient = transportVicGtfs || createTransportVicGtfs({ fetchImpl, now, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
   let activeRefreshes = 0;
+  let activeGaRequests = 0;
+  const gaRequestWaiters = [];
+
+  async function withGaRequestSlot(operation) {
+    if (activeGaRequests >= MAX_CONCURRENT_UPSTREAM_REFRESHES) {
+      await new Promise((resolve) => gaRequestWaiters.push(resolve));
+    }
+    activeGaRequests += 1;
+    try {
+      return await operation();
+    } finally {
+      activeGaRequests -= 1;
+      gaRequestWaiters.shift()?.();
+    }
+  }
 
   async function refresh(sourceId, source, bbox) {
     if (GA_SOURCE_IDS.has(sourceId)) {
@@ -175,22 +190,23 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         const payloads = [];
         try {
           for (let page = 0; page < MAX_GA_PAGES_PER_LAYER; page += 1) {
-            const controller = new AbortController();
-            const timer = setTimeout(() => {
-              const error = new Error('timeout');
-              error.code = 'TIMEOUT';
-              controller.abort(error);
-            }, timeoutMs ?? (sourceId === 'au-place-names' ? GA_GAZETTEER_TIMEOUT_MS : GA_TIMEOUT_MS));
-            let payload;
-            try {
-              const response = await fetchImpl(request.url, {
-                method: 'GET', headers: { Accept: 'application/geo+json, application/json' }, signal: controller.signal, redirect: 'error',
-              });
-              if (!response?.ok) throw new Error('upstream failed');
-              payload = await readJsonCapped(response, MAX_RESPONSE_BYTES);
-            } finally {
-              clearTimeout(timer);
-            }
+            const payload = await withGaRequestSlot(async () => {
+              const controller = new AbortController();
+              const timer = setTimeout(() => {
+                const error = new Error('timeout');
+                error.code = 'TIMEOUT';
+                controller.abort(error);
+              }, timeoutMs ?? (sourceId === 'au-place-names' ? GA_GAZETTEER_TIMEOUT_MS : GA_TIMEOUT_MS));
+              try {
+                const response = await fetchImpl(request.url, {
+                  method: 'GET', headers: { Accept: 'application/geo+json, application/json' }, signal: controller.signal, redirect: 'error',
+                });
+                if (!response?.ok) throw new Error('upstream failed');
+                return await readJsonCapped(response, MAX_RESPONSE_BYTES);
+              } finally {
+                clearTimeout(timer);
+              }
+            });
             if (!Array.isArray(payload?.features) || payload.features.length > request.requestedCount) {
               const error = new Error('invalid GA response');
               error.code = 'INVALID_GA_RESPONSE';
@@ -201,27 +217,27 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
             if (payload.exceededTransferLimit !== true) {
               return { layer: request.layer, payloads };
             }
-            if (featureCount >= source.maxFeatures || payload.features.length === 0) {
+            if (featureCount >= source.maxFeatures) {
               return { layer: request.layer, payloads, truncated: true };
             }
-            request = request.nextPage(featureCount, source.maxFeatures - featureCount);
+            const nextOffset = request.offset + (payload.features.length || request.requestedCount);
+            request = request.nextPage(nextOffset, source.maxFeatures - featureCount);
           }
           return { layer: request.layer, payloads, truncated: true };
         } catch (error) {
-          return { layer: initialRequest.layer, error };
+          return { layer: initialRequest.layer, payloads, error };
         }
       }));
-      if (layerResults.every((result) => result.error)) {
-        const invalid = layerResults.find((result) => result.error?.code === 'INVALID_GA_RESPONSE');
-        if (invalid) throw invalid.error;
-        const oversized = layerResults.find((result) => result.error?.code === 'RESPONSE_TOO_LARGE');
-        if (oversized) throw oversized.error;
-        const timedOut = layerResults.find((result) => result.error?.code === 'TIMEOUT' || result.error?.name === 'AbortError');
-        if (timedOut) {
+      const hasRetainedFeatures = (result) => result.payloads.some((payload) => payload.features.length > 0);
+      if (layerResults.every((result) => result.error && !hasRetainedFeatures(result))) {
+        const timedOut = (result) => result.error?.code === 'TIMEOUT' || result.error?.name === 'AbortError';
+        if (layerResults.every(timedOut)) {
           const error = new Error('all GA layers timed out');
           error.code = 'TIMEOUT';
           throw error;
         }
+        if (layerResults.every((result) => result.error?.code === 'INVALID_GA_RESPONSE')) throw layerResults[0].error;
+        if (layerResults.every((result) => result.error?.code === 'RESPONSE_TOO_LARGE')) throw layerResults[0].error;
         const error = new Error('all GA layers failed');
         error.code = 'ALL_GA_LAYERS_FAILED';
         throw error;

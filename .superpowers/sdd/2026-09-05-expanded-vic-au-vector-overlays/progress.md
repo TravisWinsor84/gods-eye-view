@@ -54,3 +54,18 @@
 - EPA registration, product subscription and authenticated endpoint/schema/key
   contract validation remain the only EPA activation gate. No push or deploy
   occurred.
+- Task 2 independent review failed with two P1 and three P2 findings: retained
+  pages were dropped after a later failure, source-wide cap status could be
+  falsely fresh, empty transfer-limited pages stopped pagination, GA fan-out
+  bypassed the four-request ceiling, and mixed outages were mislabeled timeout.
+- Task 2 fix round 1/5 added RED-first regressions and corrected all five
+  findings. Prior-page features now survive later upstream failure with a
+  sanitized partial-layer error; cap-omitted layers are explicitly
+  capped/unprocessed; empty transfer-limited pages advance within the two-page
+  bound; a FIFO gate limits actual GA provider fetches to four and releases on
+  errors/aborts; only unanimous no-data timeouts return 504.
+- Fresh fix-round verification: focused GA/source/proxy/credit/layer suites
+  passed 80/80; the full suite passed 2,801 with 0 failures and 1 expected
+  Node-version allocation-benchmark skip; production build passed at 161
+  modules; `git diff --check` passed. Independent re-review remains pending;
+  no push or deployment occurred.

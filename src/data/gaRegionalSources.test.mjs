@@ -161,6 +161,36 @@ test('marks a provider-truncated sublayer and source as partial', () => {
   assert.equal(result.sourceStatus.capped, true);
 });
 
+test('marks layers omitted by the source-wide cap as capped and unprocessed', () => {
+  const fullLayer = (layer) => layerPayload(layer, Array.from({ length: 500 }, (_, index) => point({
+    facility_name: `Facility ${layer}-${index}`,
+  }, [144.9 + index / 100_000, -37.8 - layer / 10_000])));
+  const result = normalizeGaRegionalPayload('au-emergency-facilities', [
+    fullLayer(0),
+    fullLayer(1),
+    ...[2, 3, 4, 5].map((layer) => layerPayload(layer, [point({
+      facility_name: `Omitted facility ${layer}`,
+    }, [144.95, -37.8 - layer / 10_000])])),
+  ]);
+
+  assert.equal(result.features.length, 1_000);
+  assert.equal(result.sourceStatus.status, 'partial');
+  assert.equal(result.sourceStatus.capped, true);
+  assert.deepEqual(result.sourceStatus.layers.slice(2), [2, 3, 4, 5].map((layer) => ({
+    layer,
+    type: [
+      'policing facility',
+      'metropolitan fire facility',
+      'rural or country fire facility',
+      'state emergency service',
+    ][layer - 2],
+    status: 'capped',
+    featureCount: 0,
+    capped: true,
+    unprocessed: true,
+  })));
+});
+
 test('caps output features and rejects malformed or unexpected layer payloads', () => {
   const rows = Array.from({ length: 1_005 }, (_, index) => point({
     name: `Place ${index}`, feature: 'LOCALITY', authority: 'VIC',
