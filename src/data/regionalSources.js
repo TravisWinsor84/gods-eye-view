@@ -336,6 +336,17 @@ export const REGIONAL_SOURCES = Object.freeze({
     configuredEnv: 'VITE_TRANSPORT_VIC_OPEN_DATA_CONFIGURED', credentialsReason: 'Transport Victoria Open Data Portal key required',
     runtimeEligible: true, maxFeatures: 1_000,
   }),
+  'vic-wetlands-2025': Object.freeze({
+    name: 'Victorian Wetland Inventory 2025', source: 'DataVic / DataShare',
+    publisher: 'Department of Energy, Environment and Climate Action',
+    endpoint: 'https://discover.data.vic.gov.au/dataset/victorian-wetland-inventory-current',
+    licence: 'Creative Commons Attribution 4.0 International', geometry: 'polygon', refreshMs: 86_400_000,
+    refresh: 'pinned 2025 mapped-inventory reference; not live water extent, flood extent, access advice, or proof that water is present',
+    credit: 'Copyright © The State of Victoria, Department of Energy, Environment and Climate Action. Licensed under Creative Commons Attribution 4.0 International.',
+    credential: 'none', requiredServerEnv: 'VIC_WETLANDS_2025_DATA_DIR', configuredEnv: 'VITE_VIC_WETLANDS_2025_CONFIGURED',
+    missingStatus: 'artifact-required', credentialsReason: 'Reviewed Victorian Wetland Inventory 2025 artifacts required',
+    runtimeEligible: true, maxFeatures: 500,
+  }),
   'au-hospital-ed-performance': Object.freeze({
     name: 'Australian historical ED performance', source: 'AIHW MyHospitals',
     ...CIVIC_SOURCE_VALIDATION['au-hospital-ed-performance'],
@@ -376,6 +387,7 @@ const AVAILABILITY_STATUSES = new Set([
   'permission-required',
   'rejected',
   'restricted',
+  'artifact-required',
   'unavailable',
 ]);
 
@@ -399,6 +411,17 @@ export function regionalSourceAvailability(sourceId, env = runtimeEnvironment())
         available: false,
         status: 'credentials-required',
         reason: cleanText(source.credentialsReason, 180) || 'Regional source credentials required',
+      };
+    }
+  }
+  if (source.requiredServerEnv) {
+    const hasServerArtifact = Boolean(cleanText(env?.[source.requiredServerEnv], 1));
+    const hasBrowserMarker = source.configuredEnv && env?.[source.configuredEnv] === 'true';
+    if (!hasServerArtifact && !hasBrowserMarker) {
+      return {
+        available: false,
+        status: source.missingStatus || 'unavailable',
+        reason: cleanText(source.credentialsReason, 180) || 'Regional source artifact required',
       };
     }
   }

@@ -1,6 +1,6 @@
 import { createRegionalLayer } from './regionalLayer.js';
 
-export function createRegionalPackDefinitions({ transportVicConfigured = false } = {}) {
+export function createRegionalPackDefinitions({ transportVicConfigured = false, wetlandsConfigured = false } = {}) {
   return Object.freeze({
   'regional-melbourne': Object.freeze({
     name: 'Melbourne Data',
@@ -72,6 +72,7 @@ export function createRegionalPackDefinitions({ transportVicConfigured = false }
       'vic-landfill-register',
       'vic-recreation-assets',
       'vic-epa-air',
+      ...(wetlandsConfigured ? ['vic-wetlands-2025'] : []),
     ]),
   }),
   'regional-planning': Object.freeze({
@@ -90,7 +91,8 @@ export function createRegionalPackDefinitions({ transportVicConfigured = false }
 }
 
 const transportVicConfigured = import.meta.env?.VITE_TRANSPORT_VIC_OPEN_DATA_CONFIGURED === 'true';
-export const REGIONAL_PACKS = createRegionalPackDefinitions({ transportVicConfigured });
+const wetlandsConfigured = import.meta.env?.VITE_VIC_WETLANDS_2025_CONFIGURED === 'true';
+export const REGIONAL_PACKS = createRegionalPackDefinitions({ transportVicConfigured, wetlandsConfigured });
 
 export const CATEGORY_REGIONAL_PACK_IDS = Object.freeze([
   'regional-civic',

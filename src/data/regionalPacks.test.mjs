@@ -53,6 +53,7 @@ test('category packs assign every admitted source once by user-facing meaning', 
     'vic-recreation-tracks', 'vic-renewable-facilities', 'vic-flood-history-2022',
     'vic-epa-priority-sites', 'vic-landfill-register', 'vic-recreation-assets', 'vic-epa-air',
   ]);
+  assert.equal(createRegionalPackDefinitions({ wetlandsConfigured: true })['regional-environment'].sourceIds.at(-1), 'vic-wetlands-2025');
   assert.deepEqual(regionalPackIds('regional-planning'), [
     'au-place-names', 'vic-heritage', 'melbourne-development', 'melbourne-culture',
     'vic-property-boundaries',

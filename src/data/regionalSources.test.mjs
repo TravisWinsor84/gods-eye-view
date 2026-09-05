@@ -44,6 +44,7 @@ test('registry declares the approved regional source IDs with immutable source c
     'ptv-transit',
     'vic-road-unplanned',
     'vic-lane-signals',
+    'vic-wetlands-2025',
     'au-hospital-ed-performance',
   ]);
   assert.equal(Object.isFrozen(REGIONAL_SOURCES), true);
@@ -58,6 +59,8 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.match(REGIONAL_SOURCES['vic-road-unplanned'].refresh, /context only/i);
   assert.equal(REGIONAL_SOURCES['vic-lane-signals'].geometry, 'point');
   assert.match(REGIONAL_SOURCES['vic-lane-signals'].refresh, /obey.*physical/i);
+  assert.equal(REGIONAL_SOURCES['vic-wetlands-2025'].requiredServerEnv, 'VIC_WETLANDS_2025_DATA_DIR');
+  assert.match(REGIONAL_SOURCES['vic-wetlands-2025'].refresh, /reference.*not live/i);
   assert.equal(REGIONAL_SOURCES['vic-cfa-alerts'].runtimeEligible, false);
   assert.equal(REGIONAL_SOURCES['au-emergency-facilities'].runtimeEligible, true);
   assert.equal(REGIONAL_SOURCES['au-health-facilities'].geometry, 'point');
@@ -126,6 +129,14 @@ test('reports regional source availability without exposing environment values',
   }), { available: true, status: 'available', reason: '' });
   assert.deepEqual(regionalSourceAvailability('vic-road-unplanned', {
     TRANSPORT_VIC_OPEN_DATA_API_KEY: ` ${secret} `,
+  }), { available: true, status: 'available', reason: '' });
+  assert.deepEqual(regionalSourceAvailability('vic-wetlands-2025', {}), {
+    available: false,
+    status: 'artifact-required',
+    reason: 'Reviewed Victorian Wetland Inventory 2025 artifacts required',
+  });
+  assert.deepEqual(regionalSourceAvailability('vic-wetlands-2025', {
+    VIC_WETLANDS_2025_DATA_DIR: '/srv/godseye/wetlands',
   }), { available: true, status: 'available', reason: '' });
   assert.deepEqual(regionalSourceAvailability('ptv-transit', {
     VITE_TRANSPORT_VIC_OPEN_DATA_CONFIGURED: 'true',

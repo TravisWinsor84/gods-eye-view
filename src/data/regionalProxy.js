@@ -7,6 +7,7 @@ import { OGC_MAX_RESPONSE_BYTES, normalizeOgcPayload, ogcFeatureRequest } from '
 import { createIndexedRegionalDownloads, INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS } from './indexedRegionalDownloads.js';
 import { createDataVicWasteFacilities } from './dataVicWasteFacilities.js';
 import { normalizeVicmapParcelPayload, vicmapParcelRequest } from './vicmapPropertyBoundaries.js';
+import { createVicWetlands2025Server } from './vicWetlands2025Server.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -193,7 +194,7 @@ function unavailableError(error) {
 }
 
 /** Create Vite middleware for the fixed, public regional-source allow-list. */
-export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, transportVicRoads, melbourneCivicClient, indexedRegionalDownloads, dataVicWasteFacilities, env = process.env } = {}) {
+export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, transportVicRoads, melbourneCivicClient, indexedRegionalDownloads, dataVicWasteFacilities, vicWetlands2025, env = process.env } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   let activeRefreshes = 0;
@@ -243,6 +244,9 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     now,
     withRequestSlot: withProviderRequestSlot,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
+  const wetlandsClient = vicWetlands2025 || createVicWetlands2025Server({
+    dataDir: env?.VIC_WETLANDS_2025_DATA_DIR,
   });
 
   async function refresh(sourceId, source, bbox, zoom) {
@@ -401,9 +405,10 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     const admissionEnv = source.credentialEnv ? { [source.credentialEnv]: env?.[source.credentialEnv] } : env;
     const availability = regionalSourceAvailability(sourceId, admissionEnv);
     if (!availability.available) {
-      const credentialsRequired = availability.status === 'credentials-required';
-      return sendJson(res, credentialsRequired ? 424 : 403, {
-        error: credentialsRequired ? 'regional source credentials required' : 'regional source is unavailable',
+      const dependencyRequired = ['credentials-required', 'artifact-required'].includes(availability.status);
+      return sendJson(res, dependencyRequired ? 424 : 403, {
+        error: availability.status === 'credentials-required' ? 'regional source credentials required'
+          : availability.status === 'artifact-required' ? 'regional source artifact required' : 'regional source is unavailable',
         ...(source.availabilityReason ? { reason: availability.reason } : {}),
       }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': availability.status });
     }
@@ -467,6 +472,19 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
           error: timedOut ? 'regional source timed out' : rateLimited
             ? 'regional source is rate limited' : 'regional source returned invalid data',
         }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': rateLimited ? 'rate-limited' : 'unavailable' });
+      }
+    }
+    if (sourceId === 'vic-wetlands-2025') {
+      try {
+        const body = await wetlandsClient.load({ bbox, maxFeatures: source.maxFeatures });
+        return sendJson(res, 200, body, {
+          'X-Regional-Source': sourceId, 'X-Regional-Status': 'fresh', 'X-Regional-Cache': 'LOCAL-RELEASE',
+        });
+      } catch (error) {
+        const artifactUnavailable = error?.code === 'ARTIFACT_UNAVAILABLE';
+        return sendJson(res, artifactUnavailable ? 424 : 502, {
+          error: artifactUnavailable ? 'regional source artifact required' : 'regional source returned invalid data',
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': artifactUnavailable ? 'artifact-required' : 'invalid-data' });
       }
     }
     if (sourceId === 'vic-waste-facilities') {

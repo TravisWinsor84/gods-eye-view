@@ -1299,6 +1299,27 @@ test('regional proxy sanitizes Transport Victoria road credential and provider f
   }
 });
 
+test('regional proxy serves only configured local 2025 wetlands artifacts', async () => {
+  const calls = [];
+  const middleware = createRegionalProxy({
+    env: { VIC_WETLANDS_2025_DATA_DIR: '/srv/wetlands' },
+    vicWetlands2025: { async load(options) {
+      calls.push(options);
+      return { type: 'FeatureCollection', features: [], sourceStatus: { status: 'current', cache: 'local-release' } };
+    } },
+  });
+  const response = await invokeRegional(middleware, `/api/regional/vic-wetlands-2025${MELBOURNE_BOUNDS}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'fresh');
+  assert.deepEqual(calls, [{ bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 }, maxFeatures: 500 }]);
+
+  const missing = await invokeRegional(createRegionalProxy({
+    env: {}, vicWetlands2025: { async load() { throw new Error('should not load'); } },
+  }), `/api/regional/vic-wetlands-2025${MELBOURNE_BOUNDS}`);
+  assert.equal(missing.status, 424);
+  assert.equal(missing.headers['x-regional-status'], 'artifact-required');
+});
+
 test('missing Google place context is a quiet keyless capability, not a 503', () => {
   assert.deepEqual(keylessGooglePlacesResponse(undefined), {
     statusCode: 200,
