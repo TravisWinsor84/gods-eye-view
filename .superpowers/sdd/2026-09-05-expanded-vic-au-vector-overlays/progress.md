@@ -29,6 +29,8 @@
 - Task 1 implementation committed as `06d6d5f`; affected layer tests 15/15, focused 43/43, full suite 2,775 passed with 1 skip, and build clean.
 - Task 1 independent review found zero runtime defects and two P2 documentation-contract defects: stale whole-catalogue inactive wording and a prematurely named EPA environment variable in the registered-operations follow-on plan. Fix round 1/5 corrects only those statements.
 - Task 1 re-review 1 confirmed the EPA contract fix but found one remaining P2: catalogue wording equated runtime eligibility with an implemented proxy/layer even though AIHW is eligible but not yet wired. Fix round 2/5 scopes integration status per entry.
+- Task 1 final re-review passed with zero actionable findings. Task 1 complete at `cea0304`; runtime verification remains 2,775 passed, 0 failed, 1 skipped, with build clean.
+- Task 2 preflight: live ArcGIS 11.1 metadata confirmed six emergency layers, three health layers, and one composite gazetteer layer in decimal degrees; exact field schemas captured for allow-list design.
 - Task 1 TDD implementation is complete. The controller approved a bounded
   correction to the two stale `src/data/regionalLayer.test.mjs` fixtures; they
   now use `melbourne-trees` while preserving route, clustering, source-local

@@ -62,3 +62,6 @@ Re-review found one residual overstatement: runtime eligibility was described
 as if it guaranteed an implemented proxy and layer. The catalogue now separates
 implemented adapters, validated-but-unwired candidates such as AIHW, and
 runtime-ineligible records. No runtime code changed in fix round 2/5.
+
+Final independent re-review passed with zero actionable findings. Task 1 is
+review-clean at `cea0304`.
