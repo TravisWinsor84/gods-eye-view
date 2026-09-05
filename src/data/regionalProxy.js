@@ -1,4 +1,4 @@
-import { REGIONAL_SOURCES, normalizeRegionalFeatureCollection } from './regionalSources.js';
+import { REGIONAL_SOURCES, normalizeRegionalFeatureCollection, regionalSourceAvailability } from './regionalSources.js';
 import { createTransportVicGtfs } from './transportVicGtfs.js';
 
 const MAX_CACHE_ENTRIES = 64;
@@ -28,10 +28,6 @@ const SOURCE_TRANSPORT = Object.freeze({
     timeoutMs: 10_000,
     url: (bbox, source) => cityGeoJsonUrl('water-flow-routes-over-land-urban-forest', bbox, source.maxFeatures),
   }),
-  'vic-epa-air': Object.freeze({
-    timeoutMs: 6_000,
-    url: (bbox) => endpointUrl('https://gateway.api.epa.vic.gov.au/environmentMonitoring/v1/sites', bbox),
-  }),
   'vic-fire-context': Object.freeze({
     timeoutMs: 12_000,
     url: (bbox, source) => arcGisGeoJsonUrl('https://mapshare.vic.gov.au/arcgis/rest/services/Planning_Schemes/MapServer/0/query', bbox, source.maxFeatures),
@@ -57,15 +53,6 @@ function cityGeoJsonUrl(dataset, bbox, limit) {
   const url = new URL(`https://data.melbourne.vic.gov.au/api/explore/v2.1/catalog/datasets/${dataset}/exports/geojson`);
   url.searchParams.set('where', `intersects(geo_shape, geom'POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},${bbox.east} ${bbox.north},${bbox.west} ${bbox.north},${bbox.west} ${bbox.south}))')`);
   url.searchParams.set('limit', String(limit));
-  return url;
-}
-
-function endpointUrl(endpoint, bbox) {
-  const url = new URL(endpoint);
-  url.searchParams.set('west', String(bbox.west));
-  url.searchParams.set('south', String(bbox.south));
-  url.searchParams.set('east', String(bbox.east));
-  url.searchParams.set('north', String(bbox.north));
   return url;
 }
 
@@ -168,7 +155,7 @@ function unavailableError(error) {
 }
 
 /** Create Vite middleware for the fixed, public regional-source allow-list. */
-export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs } = {}) {
+export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, env = process.env } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   const transportClient = transportVicGtfs || createTransportVicGtfs({ fetchImpl, now, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
@@ -201,15 +188,20 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     const sourceId = requestSourceId(url.pathname);
     if (!sourceId || !Object.hasOwn(REGIONAL_SOURCES, sourceId)) return sendJson(res, 404, { error: 'unknown regional source' });
     const source = REGIONAL_SOURCES[sourceId];
-    if (!source.runtimeEligible) return sendJson(res, 403, { error: 'regional source is unavailable' });
+    const admissionEnv = source.credentialEnv ? { [source.credentialEnv]: env?.[source.credentialEnv] } : env;
+    const availability = regionalSourceAvailability(sourceId, admissionEnv);
+    if (!availability.available) {
+      const credentialsRequired = availability.status === 'credentials-required';
+      return sendJson(res, credentialsRequired ? 424 : 403, {
+        error: credentialsRequired ? 'regional source credentials required' : 'regional source is unavailable',
+        ...(source.availabilityReason ? { reason: availability.reason } : {}),
+      }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': availability.status });
+    }
     const bbox = parseBounds(url);
     if (!bbox) return sendJson(res, 400, { error: 'invalid regional bounds' });
-    const serverApiKey = source.serverCredential
-      ? String(process.env[source.serverCredential] || '').trim()
+    const serverApiKey = source.credentialEnv
+      ? String(env?.[source.credentialEnv] || '').trim()
       : '';
-    if (source.serverCredential && !serverApiKey) {
-      return sendJson(res, 424, { error: 'regional source credentials required' }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'credentials-required' });
-    }
     if (sourceId === 'ptv-transit') {
       try {
         const payload = await transportClient.load({ bbox, apiKey: serverApiKey, maxFeatures: source.maxFeatures });

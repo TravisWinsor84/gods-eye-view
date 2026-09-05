@@ -99,8 +99,10 @@ export const REGIONAL_SOURCES = Object.freeze({
   }),
   'vic-epa-air': Object.freeze({
     name: 'Victoria Air Quality', source: 'EPA Victoria', publisher: 'Environment Protection Authority Victoria',
-    endpoint: 'https://www.epa.vic.gov.au/for-community/monitoring-your-environment/monitoring-victorias-water-quality', licence: 'EPA Victoria terms',
-    geometry: 'point', refreshMs: 300_000, refresh: 'five minutes; upstream observations update hourly', credit: 'EPA Victoria', credential: 'none', runtimeEligible: true, maxFeatures: 250,
+    endpoint: null, licence: 'EPA Victoria developer/API terms pending registration and product-subscription validation',
+    geometry: 'not runtime eligible', refreshMs: 0, refresh: 'not fetched; provider contract unverified', credit: 'EPA Victoria',
+    credential: 'registration-required', runtimeEligible: false, decision: 'credentials-required',
+    availabilityReason: 'EPA Victoria registration required', maxFeatures: 0,
   }),
   'vic-cfa-alerts': Object.freeze({
     name: 'CFA / VicEmergency RSS (restricted)', source: 'CFA RSS feeds', publisher: 'Country Fire Authority Victoria',
@@ -128,7 +130,9 @@ export const REGIONAL_SOURCES = Object.freeze({
     geometry: 'point', refreshMs: 30_000, refresh: 'provider snapshots cached globally by mode for at least 30 seconds', credit: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.',
     // Browser layers require no credential. The proxy enforces this server-only
     // provider credential and returns an honest 424 when it is absent.
-    credential: 'none', serverCredential: 'TRANSPORT_VIC_OPEN_DATA_API_KEY', runtimeEligible: true, maxFeatures: 1_000,
+    credential: 'none', serverCredential: 'TRANSPORT_VIC_OPEN_DATA_API_KEY', credentialEnv: 'TRANSPORT_VIC_OPEN_DATA_API_KEY',
+    configuredEnv: 'VITE_TRANSPORT_VIC_OPEN_DATA_CONFIGURED', credentialsReason: 'Transport Victoria Open Data Portal key required',
+    runtimeEligible: true, maxFeatures: 1_000,
   }),
   'au-hospital-ed-performance': Object.freeze({
     name: 'Australian historical ED performance', source: 'AIHW MyHospitals',
@@ -147,8 +151,57 @@ function sourceFor(sourceId) {
   return REGIONAL_SOURCES[sourceId];
 }
 
+function availabilitySourceFor(sourceId) {
+  if (Object.hasOwn(REGIONAL_SOURCES, sourceId)) return REGIONAL_SOURCES[sourceId];
+  if (Object.hasOwn(CIVIC_SOURCE_VALIDATION, sourceId)) return CIVIC_SOURCE_VALIDATION[sourceId];
+  throw new Error(`Unknown regional source: ${sourceId}`);
+}
+
 function cleanText(value, maxLength = MAX_TEXT_LENGTH) {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, maxLength) : '';
+}
+
+function runtimeEnvironment() {
+  if (typeof process !== 'undefined' && process?.env) return process.env;
+  return import.meta.env || {};
+}
+
+const AVAILABILITY_STATUSES = new Set([
+  'available',
+  'credentials-required',
+  'licence-required',
+  'metadata-link-only',
+  'permission-required',
+  'rejected',
+  'restricted',
+  'unavailable',
+]);
+
+/** Return credential-safe admission state for one fixed regional source. */
+export function regionalSourceAvailability(sourceId, env = runtimeEnvironment()) {
+  const source = availabilitySourceFor(sourceId);
+  if (!source.runtimeEligible) {
+    const status = AVAILABILITY_STATUSES.has(source.decision) ? source.decision : 'unavailable';
+    return {
+      available: false,
+      status,
+      reason: cleanText(source.availabilityReason, 180) || 'Regional source unavailable',
+    };
+  }
+
+  if (source.credentialEnv) {
+    const hasServerCredential = Boolean(cleanText(env?.[source.credentialEnv], 1));
+    const hasBrowserMarker = source.configuredEnv && env?.[source.configuredEnv] === 'true';
+    if (!hasServerCredential && !hasBrowserMarker) {
+      return {
+        available: false,
+        status: 'credentials-required',
+        reason: cleanText(source.credentialsReason, 180) || 'Regional source credentials required',
+      };
+    }
+  }
+
+  return { available: true, status: 'available', reason: '' };
 }
 
 function safeUrl(value) {
@@ -249,20 +302,6 @@ function geoJsonFeatures(source, payload, maxFeatures) {
     const properties = row?.properties || {};
     return feature(row?.id ?? properties.id ?? properties.objectid, geometry, propertiesFor(properties,
       properties.title || properties.name || properties.road_name || properties.label || properties.feature_name));
-  });
-}
-
-function epaFeatures(payload, maxFeatures) {
-  const rows = Array.isArray(payload?.data) ? payload.data : payload?.stations;
-  if (!Array.isArray(rows)) throw new Error('vic-epa-air payload must contain a data or stations array');
-  return collectFeatures(rows, maxFeatures, (row) => {
-    const longitude = coordinate(row?.longitude ?? row?.lon, -180, 180);
-    const latitude = coordinate(row?.latitude ?? row?.lat, -90, 90);
-    if (longitude === null || latitude === null) return null;
-    const name = cleanText(row?.stationName || row?.station_name || row?.name, 180) || 'EPA monitoring station';
-    const aqi = Number.isFinite(Number(row?.aqi ?? row?.airQualityIndex)) ? Number(row.aqi ?? row.airQualityIndex) : null;
-    return feature(row?.stationId ?? row?.station_id ?? row?.id, { type: 'Point', coordinates: [longitude, latitude] },
-      propertiesFor({ ...row, aqi }, aqi === null ? name : `${name} - AQI ${aqi}`));
   });
 }
 
@@ -394,7 +433,6 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   if (!source.runtimeEligible) throw new Error(`${sourceId} is not runtime eligible: restricted source terms`);
   let features;
   if (['melbourne-trees', 'melbourne-places'].includes(sourceId)) features = recordFeatures(sourceId, payload, source.maxFeatures);
-  else if (sourceId === 'vic-epa-air') features = epaFeatures(payload, source.maxFeatures);
   else if (sourceId === 'ptv-transit') features = ptvFeatures(payload, source.maxFeatures);
   else if (sourceId === 'au-hospital-ed-performance') features = aihwFeatures(source, payload);
   else features = geoJsonFeatures(source, payload, source.maxFeatures);

@@ -5,6 +5,7 @@ import {
   REGIONAL_SOURCES,
   normalizeRegionalFeatureCollection,
   regionalSourceAttribution,
+  regionalSourceAvailability,
 } from './regionalSources.js';
 
 test('registry declares the approved regional source IDs with immutable source contracts', () => {
@@ -24,11 +25,44 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(Object.isFrozen(REGIONAL_SOURCES), true);
   assert.equal(Object.isFrozen(REGIONAL_SOURCES['melbourne-trees']), true);
   assert.equal(REGIONAL_SOURCES['melbourne-trees'].geometry, 'point');
-  assert.equal(REGIONAL_SOURCES['vic-epa-air'].refreshMs, 300_000);
+  assert.equal(REGIONAL_SOURCES['vic-epa-air'].runtimeEligible, false);
+  assert.equal(REGIONAL_SOURCES['vic-epa-air'].credential, 'registration-required');
+  assert.equal(REGIONAL_SOURCES['vic-epa-air'].endpoint, null);
   assert.equal(REGIONAL_SOURCES['ptv-transit'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');
   assert.match(REGIONAL_SOURCES['ptv-transit'].endpoint, /opendata\.transport\.vic\.gov\.au\/dataset\/gtfs-realtime/);
   assert.equal(REGIONAL_SOURCES['vic-cfa-alerts'].runtimeEligible, false);
   assert.ok(Number.isInteger(REGIONAL_SOURCES['melbourne-trees'].maxFeatures));
+});
+
+test('reports regional source availability without exposing environment values', () => {
+  const secret = 'provider-secret-must-not-escape';
+  assert.deepEqual(regionalSourceAvailability('vic-epa-air', { UNRELATED_SECRET: secret }), {
+    available: false,
+    status: 'credentials-required',
+    reason: 'EPA Victoria registration required',
+  });
+  assert.deepEqual(regionalSourceAvailability('melbourne-trees', {}), {
+    available: true,
+    status: 'available',
+    reason: '',
+  });
+  assert.deepEqual(regionalSourceAvailability('ptv-transit', {}), {
+    available: false,
+    status: 'credentials-required',
+    reason: 'Transport Victoria Open Data Portal key required',
+  });
+  assert.deepEqual(regionalSourceAvailability('ptv-transit', {
+    TRANSPORT_VIC_OPEN_DATA_API_KEY: ` ${secret} `,
+  }), { available: true, status: 'available', reason: '' });
+  assert.deepEqual(regionalSourceAvailability('ptv-transit', {
+    VITE_TRANSPORT_VIC_OPEN_DATA_CONFIGURED: 'true',
+  }), { available: true, status: 'available', reason: '' });
+  assert.deepEqual(regionalSourceAvailability('vahi-daily-ed-wait', {}), {
+    available: false,
+    status: 'permission-required',
+    reason: 'Regional source unavailable',
+  });
+  assert.doesNotMatch(JSON.stringify(regionalSourceAvailability('vic-epa-air', { UNRELATED_SECRET: secret })), new RegExp(secret));
 });
 
 test('civic validation decisions keep executable and non-executable contracts separate', () => {
@@ -215,18 +249,16 @@ test('constrains GeoJSON features to registered geometry and bounded public prop
   assert.equal('unsafe' in result.features[0].properties, false);
 });
 
-test('normalizes EPA station payloads with an AQI title and rejects missing or non-numeric positions', () => {
-  const result = normalizeRegionalFeatureCollection('vic-epa-air', {
-    data: [
-      { stationId: 'melbourne', stationName: 'Melbourne CBD', latitude: -37.8136, longitude: 144.9631, aqi: 42, category: 'Good' },
-      { stationId: 'missing', stationName: 'Missing position', aqi: 12 },
-      { stationId: 'blank', stationName: 'Blank position', latitude: '', longitude: 144.9 },
-      { stationId: 'boolean', stationName: 'Boolean position', latitude: -37.8, longitude: false },
-    ],
-  });
-  assert.equal(result.features.length, 1);
-  assert.equal(result.features[0].properties.title, 'Melbourne CBD - AQI 42');
-  assert.equal(result.features[0].properties.aqi, 42);
+test('rejects EPA payloads before reading them while the provider contract is unverified', () => {
+  const unreadablePayload = {
+    get data() {
+      throw new Error('unverified EPA payload must not be read');
+    },
+  };
+  assert.throws(
+    () => normalizeRegionalFeatureCollection('vic-epa-air', unreadablePayload),
+    /vic-epa-air is not runtime eligible/,
+  );
 });
 
 test('rejects the restricted CFA/VicEmergency RSS source before parsing its payload', () => {

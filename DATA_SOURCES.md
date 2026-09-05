@@ -52,7 +52,7 @@ none is documented here.
 | `melbourne-places` | City of Melbourne, [Open Data Explore API](https://data.melbourne.vic.gov.au/api-console/explore/v2.1/) | CC BY, as declared by the selected City of Melbourne dataset | `City of Melbourne Open Data` | Point | Daily; source record catalogue refresh |
 | `melbourne-cycling` | City of Melbourne, [Open Data Explore API](https://data.melbourne.vic.gov.au/api-console/explore/v2.1/) | CC BY, as declared by the selected City of Melbourne dataset | `City of Melbourne Open Data` | Line | Daily; viewport-bounded source query |
 | `melbourne-water-history` | City of Melbourne, [Open Data Explore API](https://data.melbourne.vic.gov.au/api-console/explore/v2.1/) | CC BY, as declared by the selected City of Melbourne dataset | `City of Melbourne Open Data` | Line or polygon | Weekly; static/historical source check |
-| `vic-epa-air` | Environment Protection Authority Victoria, [environment monitoring API information](https://www.epa.vic.gov.au/for-community/monitoring-your-environment/monitoring-victorias-water-quality) | EPA Victoria developer/API terms; validate the API-access terms before activation | `EPA Victoria` | Point | Five-minute application refresh; EPA observations update hourly |
+| `vic-epa-air` | Environment Protection Authority Victoria, [EPA developer portal](https://portal.api.epa.vic.gov.au/); exact API endpoint is not yet validated | **Registration and product subscription required - not runtime eligible.** Validate the subscribed endpoint, schema, quota, attribution and developer/API terms before activation. | `EPA Victoria` | Not normalized or displayed | Not fetched. EPA reports hourly air observations, but no application cadence is claimed until the subscribed API contract is smoke-tested. |
 | `vic-cfa-alerts` | Country Fire Authority Victoria, [CFA RSS feeds](https://www.cfa.vic.gov.au/rss-feeds) | **Restricted - not runtime eligible.** CFA RSS terms limit use to personal, non-commercial use, prohibit modification, and require supplied links to be displayed. | `CFA RSS feeds` | Not normalized or displayed | Not fetched. A compatible official feed or written developer data-feed contract is required before reconsideration. |
 | `vic-fire-context` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Polygon or line | Daily viewport query |
 | `vic-freight-network` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Line or point | Daily viewport query |
@@ -66,6 +66,15 @@ demand, capacity, ambulance-offload, medical-routing or treatment-forecast
 source. Every normalized datum keeps its official link, reporting period, API
 freshness metadata, caveats and error state. Suppressed values are marked but
 never emitted as numbers. This registration does not add a proxy, layer or UI.
+
+`vic-epa-air` is deliberately fail-closed. The previously recorded URL was an
+information page, not a supported API endpoint, and the guessed gateway route
+returned 404 during provider research. EPA developer-portal signup and product
+subscription are still required before the real endpoint and key contract can
+be inspected. The source therefore has no callable request template, no
+environment-variable contract, and no pack membership. Do not add an EPA key
+name or endpoint to configuration until an authenticated, licence-compatible
+air-quality response has been validated without exposing the credential.
 
 `ptv-transit` uses only the four current vehicle-position feeds beneath
 `https://api.opendata.transport.vic.gov.au/opendata/public-transport/gtfs/realtime/v1`:

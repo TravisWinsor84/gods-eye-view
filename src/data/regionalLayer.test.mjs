@@ -97,7 +97,7 @@ test('uses one clustered CustomDataSource and only the regional proxy route', as
   const urls = [];
   const layer = createRegionalLayer({
     id: 'regional-victoria',
-    sourceIds: ['vic-epa-air'],
+    sourceIds: ['melbourne-trees'],
     name: 'Victoria',
     icon: 'V',
     color: '#22cc88',
@@ -107,7 +107,7 @@ test('uses one clustered CustomDataSource and only the regional proxy route', as
   await layer.enable(viewer);
   await withFetch(async (url) => {
     urls.push(String(url));
-    return response([pointFeature('epa-1', 144.96, -37.81)]);
+    return response([pointFeature('tree-1', 144.96, -37.81)]);
   }, () => layer.update(viewer));
 
   assert.equal(added.length, 1);
@@ -115,7 +115,7 @@ test('uses one clustered CustomDataSource and only the regional proxy route', as
   assert.equal(added[0].clustering.enabled, true);
   assert.equal(added[0].entities.values.length, 1);
   assert.equal(urls.length, 1);
-  assert.match(urls[0], /^\/api\/regional\/vic-epa-air\?/);
+  assert.match(urls[0], /^\/api\/regional\/melbourne-trees\?/);
   assert.doesNotMatch(urls[0], /^https?:/);
 });
 
@@ -123,7 +123,7 @@ test('retains each source last-good cohort and uniquely names a failed DataVic s
   const { viewer, added } = viewerStub();
   const layer = createRegionalLayer({
     id: 'regional-victoria',
-    sourceIds: ['vic-epa-air', 'vic-fire-context'],
+    sourceIds: ['melbourne-trees', 'vic-fire-context'],
     name: 'Victoria',
     icon: 'V',
     color: '#22cc88',
@@ -135,8 +135,8 @@ test('retains each source last-good cohort and uniquely names a failed DataVic s
   await withFetch(async (url) => {
     const sourceId = new URL(String(url), 'http://test').pathname.split('/').at(-1);
     if (refresh === 1 && sourceId === 'vic-fire-context') throw new Error('offline');
-    if (sourceId === 'vic-epa-air') {
-      return response([pointFeature(refresh === 0 ? 'epa-old' : 'epa-new', 144.96, -37.81)]);
+    if (sourceId === 'melbourne-trees') {
+      return response([pointFeature(refresh === 0 ? 'tree-old' : 'tree-new', 144.96, -37.81)]);
     }
     return response([pointFeature('fire-old', 144.95, -37.82)]);
   }, async () => {
@@ -147,7 +147,7 @@ test('retains each source last-good cohort and uniquely names a failed DataVic s
 
   assert.deepEqual(
     added[0].entities.values.map((entity) => entity.id).sort(),
-    ['vic-epa-air:epa-new', 'vic-fire-context:fire-old'],
+    ['melbourne-trees:tree-new', 'vic-fire-context:fire-old'],
   );
   assert.equal(layer.getStats().count, 2);
   assert.match(layer.getStats().error, /Victoria Fire Context/);

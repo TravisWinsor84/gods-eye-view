@@ -18,7 +18,6 @@ export function createRegionalPackDefinitions({ transportVicConfigured = false }
     icon: 'V',
     color: '#ff9f43',
     sourceIds: Object.freeze([
-      'vic-epa-air',
       'vic-fire-context',
       'vic-freight-network',
       ...(transportVicConfigured ? ['ptv-transit'] : []),

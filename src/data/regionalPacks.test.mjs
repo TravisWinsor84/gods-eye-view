@@ -34,7 +34,7 @@ test('Melbourne pack contains exactly the four approved no-account sources', () 
   ]);
 });
 
-test('regional packs contain runtime sources and omit Transport Victoria until configured', () => {
+test('regional packs contain runtime sources and omit registered sources until configured', () => {
   for (const packId of EXPECTED_PACK_IDS) {
     const sourceIds = regionalPackIds(packId);
     assert.ok(sourceIds.length > 0, `${packId} must not be empty`);
@@ -43,16 +43,15 @@ test('regional packs contain runtime sources and omit Transport Victoria until c
     }
   }
   assert.deepEqual(regionalPackIds('regional-victoria'), [
-    'vic-epa-air',
     'vic-fire-context',
     'vic-freight-network',
   ]);
   assert.deepEqual(createRegionalPackDefinitions({ transportVicConfigured: true })['regional-victoria'].sourceIds, [
-    'vic-epa-air',
     'vic-fire-context',
     'vic-freight-network',
     'ptv-transit',
   ]);
+  assert.equal(regionalPackIds('regional-victoria').includes('vic-epa-air'), false);
   assert.equal(REGIONAL_SOURCES['ptv-transit'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');
 });
 

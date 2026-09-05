@@ -64,6 +64,24 @@ test('regional proxy rejects restricted CFA and malformed bounds before fetch', 
   assert.equal(fetchCalls, 0);
 });
 
+test('regional proxy reports EPA registration required without constructing or fetching an endpoint', async () => {
+  let fetchCalls = 0;
+  const secret = 'unverified-epa-secret';
+  const response = await invokeRegional(createRegionalProxy({
+    env: { UNRELATED_SECRET: secret },
+    fetchImpl: async () => { fetchCalls += 1; return regionalResponseJson({}); },
+  }), `/api/regional/vic-epa-air${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 424);
+  assert.equal(response.headers['x-regional-status'], 'credentials-required');
+  assert.deepEqual(JSON.parse(response.body), {
+    error: 'regional source credentials required',
+    reason: 'EPA Victoria registration required',
+  });
+  assert.equal(fetchCalls, 0);
+  assert.doesNotMatch(response.body, new RegExp(secret));
+});
+
 test('regional proxy builds a fixed official route from only the approved source and bbox', async () => {
   let requestedUrl = '';
   const response = await invokeRegional(createRegionalProxy({
