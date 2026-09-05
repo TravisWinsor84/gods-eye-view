@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "sourceId": "vic-wetlands-2025",
+  "edition": "2025",
+  "datasetId": "514a3b37-6a42-47c5-a159-dab47cbf752a",
+  "metadataUuid": "1621d8fc-4afa-5d31-a612-f822c88f4891",
+  "resourceId": "a7069c00-29e4-407f-89f2-7a9da546b4a1",
+  "resourceFormat": "SHP",
+  "resourceUrl": "https://discover.data.vic.gov.au/dataset/victorian-wetland-inventory-current/resource/a7069c00-29e4-407f-89f2-7a9da546b4a1",
+  "periodEnd": "2025-03-19",
+  "license": "Creative Commons Attribution 4.0 International",
+  "attribution": "Copyright (c) The State of Victoria, Department of Energy, Environment and Climate Action",
+  "sourceArchive": {
+    "fileName": "source.geojson",
+    "bytes": 1143,
+    "sha256": "bdc38f338a27d81bcf5b5c092dafe5a2a71a04dc7e5c85168b1aaab2d2486f44"
+  },
+  "limits": {
+    "maxSourceBytes": 2147483648,
+    "maxFeatures": 450000,
+    "maxCoordinatesPerFeature": 250000,
+    "maxCoordinatesTotal": 60000000,
+    "maxRingsPerFeature": 2048,
+    "maxCellsPerFeature": 256,
+    "maxCellBytes": 16777216,
+    "maxOutputBytes": 536870912
+  },
+  "transform": {
+    "gridDegrees": 0.25,
+    "simplifyToleranceDegrees": 0.00005,
+    "coordinateDecimals": 6
+  }
+}
