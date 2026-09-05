@@ -35,6 +35,42 @@ const OGC_FEATURE_SOURCES = Object.freeze({
     propertyName: 'geom,site_name,heritage_object',
     geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
   }),
+  'vic-ev-chargers': Object.freeze({
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
+    typeName: 'open-data-platform:dcav_site',
+    propertyName: 'geom,location,region,lead_organisation,estimated_project_completion,plug_type,company,number_of_chargers',
+    geometryTypes: Object.freeze(['Point']),
+  }),
+  'vic-renewable-facilities': Object.freeze({
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
+    typeName: 'open-data-platform:renewables',
+    propertyName: 'geom,name,type,approval_status,construction_status,lga,size_mw,turbines,ancillary_battery,ancillary_battery_size',
+    geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
+  }),
+  'vic-flood-history-2022': Object.freeze({
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
+    typeName: 'open-data-platform:vic_flood_history_public',
+    propertyName: 'geom,subtype,obs_date,source,label',
+    geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
+  }),
+  'vic-epa-priority-sites': Object.freeze({
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
+    typeName: 'open-data-platform:psr_polygon',
+    propertyName: 'geom,municipality,suburb,issue,data_extracted_on',
+    geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
+  }),
+  'vic-landfill-register': Object.freeze({
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
+    typeName: 'open-data-platform:vlr_polygon',
+    propertyName: 'geom,suburb,council,landfill_name,operating_status,waste_type_accepted,estimated_year_of_closure,estimated_total_waste_volume,data_extracted_on',
+    geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
+  }),
+  'vic-recreation-assets': Object.freeze({
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
+    typeName: 'open-data-platform:recweb_asset',
+    propertyName: 'geom,name,asset_cls,category,dis_access,label,published,vers_date,fac_type,type_',
+    geometryTypes: Object.freeze(['Point']),
+  }),
 });
 
 export const OGC_SOURCE_CREDITS = Object.freeze({

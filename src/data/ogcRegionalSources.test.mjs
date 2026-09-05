@@ -47,6 +47,26 @@ test('builds only fixed WFS requests with bbox, EPSG:4326, GeoJSON and count cap
   assert.throws(() => ogcFeatureRequest('vic-parks', BBOX, 1_001), /invalid OGC feature limit/);
 });
 
+test('builds the six final-gap DataVic requests with exact public property allowlists', () => {
+  const expected = {
+    'vic-ev-chargers': ['open-data-platform:dcav_site', 'geom,location,region,lead_organisation,estimated_project_completion,plug_type,company,number_of_chargers'],
+    'vic-renewable-facilities': ['open-data-platform:renewables', 'geom,name,type,approval_status,construction_status,lga,size_mw,turbines,ancillary_battery,ancillary_battery_size'],
+    'vic-flood-history-2022': ['open-data-platform:vic_flood_history_public', 'geom,subtype,obs_date,source,label'],
+    'vic-epa-priority-sites': ['open-data-platform:psr_polygon', 'geom,municipality,suburb,issue,data_extracted_on'],
+    'vic-landfill-register': ['open-data-platform:vlr_polygon', 'geom,suburb,council,landfill_name,operating_status,waste_type_accepted,estimated_year_of_closure,estimated_total_waste_volume,data_extracted_on'],
+    'vic-recreation-assets': ['open-data-platform:recweb_asset', 'geom,name,asset_cls,category,dis_access,label,published,vers_date,fac_type,type_'],
+  };
+
+  for (const [sourceId, [typeName, propertyName]] of Object.entries(expected)) {
+    const url = ogcFeatureRequest(sourceId, BBOX, sourceId === 'vic-flood-history-2022' ? 1 : 100);
+    assert.equal(url.origin, 'https://opendata.maps.vic.gov.au');
+    assert.equal(url.searchParams.get('typeName'), typeName);
+    assert.equal(url.searchParams.get('propertyName'), propertyName);
+    assert.equal(url.searchParams.get('count'), sourceId === 'vic-flood-history-2022' ? '1' : '100');
+    assert.equal(url.searchParams.get('maxFeatures'), url.searchParams.get('count'));
+  }
+});
+
 test('hotspots retain observation uncertainty and confidence without IDs or safety-of-life claims', () => {
   const normalized = normalizeOgcFeature('au-dea-hotspots', feature(
     { type: 'Point', coordinates: [144.96, -37.81] },
