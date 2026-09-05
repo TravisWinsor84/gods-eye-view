@@ -15,7 +15,9 @@
   `git diff --check` passed.
 - No push or deployment occurred.
 
-Task 1 is code-complete for the committed six-file slice but is not live-complete
-because two of six official sources do not yet return useful proxy output. The
-remaining source/test ownership was handed back for the concurrent waste-source
-integration; this report does not modify or claim its work.
+Follow-up closure now returns HTTP 200 from all six real proxy paths. Renewables
+retains 248/252 valid facilities as partial; flood preserves the provider's
+bounded 1,410-ring feature and returns one capped historical result. The focused
+OGC/source/proxy/waste/Vicmap suite passes 115/115. Task 1 is live-complete; a
+repository-wide suite/build pass remains part of final integration. No push or
+deployment occurred.

@@ -116,3 +116,37 @@ focused suite passed 98/98 before the waste/Vicmap integrations changed shared
 state.
 
 No push or deployment occurred.
+
+## Follow-up live closure
+
+The two live blockers were fixed without changing the global OGC limits.
+
+- Renewables now has a source-only one-million-comparison topology budget. The
+  real Victoria-wide response normalizes in 47 ms and returns 248 of 252
+  facilities. Four provider geometries remain invalid and are honestly omitted
+  as a `partial`/degraded result.
+- The flood response contains 1,410 rings and 56,522 input coordinates. Attempts
+  to reduce it to 8,000, 20,000 and 40,000 coordinates created a self-
+  intersecting ring and were rejected. The reviewed final contract therefore
+  preserves the bounded official geometry instead of emitting altered
+  topology: one feature, 1.5 MB response, 60,000 input/output coordinates,
+  2,000 rings, and 20 million ring-validation comparisons. Every ring remains
+  structurally and self-intersection validated; the source-only quadratic
+  inter-ring relation scan is omitted. The live result normalizes in 77 ms,
+  returns one historical/capped feature, and emits 56,521 coordinates after one
+  redundant consecutive coordinate is removed.
+
+The final real-proxy Victoria-wide smoke returned HTTP 200 for all six sources:
+
+| Source | Features | Honest status |
+| --- | ---: | --- |
+| EV chargers | 152 | fresh/current |
+| Renewable facilities | 248 | degraded/partial; 4 invalid provider geometries omitted |
+| Flood history | 1 | degraded/partial/capped; 1 of 1,826 matched features |
+| EPA priority sites | 66 | degraded/partial; 3 invalid provider geometries omitted |
+| Landfill register | 275 | degraded/partial; 1 invalid and 1 duplicate omitted |
+| Recreation assets | 996 | degraded/partial/capped; 4 duplicates omitted |
+
+The final-gap focused suite passed 115 tests across the OGC, source registry,
+proxy, waste and Vicmap modules. A repository-wide suite/build pass remains part
+of the final integration task. No push or deployment occurred.

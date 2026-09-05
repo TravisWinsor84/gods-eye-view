@@ -100,7 +100,7 @@ test('uses safe regional fallback titles for untitled EPA and landfill polygons'
   assert.equal(landfill.properties.title, 'Frankston North landfill register area');
 });
 
-test('simplifies a flood outlier deterministically within its source-only output cap and marks it partial', () => {
+test('preserves a bounded flood outlier exactly within its source-only cap and marks it partial', () => {
   const openRing = Array.from({ length: 56_000 }, (_, index) => {
     const angle = (index / 56_000) * Math.PI * 2;
     return [145 + Math.cos(angle), -37 + Math.sin(angle)];
@@ -120,8 +120,8 @@ test('simplifies a flood outlier deterministically within its source-only output
   assert.equal(first.features[0].geometry.coordinates[0].length, 1);
   assert.deepEqual(first.features[0].geometry.coordinates[0][0][0], first.features[0].geometry.coordinates[0][0].at(-1));
   assert.equal(first.sourceStatus.coordinateCount, 56_001);
-  assert.ok(first.sourceStatus.outputCoordinateCount <= 4_000);
-  assert.equal(first.sourceStatus.simplifiedFeatures, 1);
+  assert.equal(first.sourceStatus.outputCoordinateCount, 56_001);
+  assert.equal(first.sourceStatus.simplifiedFeatures, 0);
   assert.equal(first.sourceStatus.capped, true);
   assert.equal(first.sourceStatus.status, 'partial');
 });
@@ -139,6 +139,51 @@ test('keeps the flood input ceiling bounded and omits an oversized feature while
   assert.equal(result.features.length, 1);
   assert.equal(result.features[0].properties.label, 'Retained');
   assert.equal(result.sourceStatus.invalidFeatures, 1);
+  assert.equal(result.sourceStatus.status, 'partial');
+});
+
+test('admits a bounded complex renewable multipolygon without weakening the global topology budget', () => {
+  const polygons = Array.from({ length: 200 }, (_, index) => {
+    const centerX = 140 + (index % 20) * 0.1;
+    const centerY = -39 + Math.floor(index / 20) * 0.1;
+    const open = Array.from({ length: 60 }, (_unused, vertex) => {
+      const angle = (vertex / 60) * Math.PI * 2;
+      return [centerX + Math.cos(angle) * 0.01, centerY + Math.sin(angle) * 0.01];
+    });
+    return [[...open, open[0]]];
+  });
+  const result = normalizeOgcPayload('vic-renewable-facilities', {
+    type: 'FeatureCollection', numberMatched: 1, numberReturned: 1,
+    features: [feature({ type: 'MultiPolygon', coordinates: polygons }, { name: 'Complex valid facility' })],
+  }, { maxFeatures: 1 });
+  assert.equal(result.features.length, 1);
+  assert.equal(result.sourceStatus.status, 'current');
+  assert.equal(result.sourceStatus.coordinateCount, 12_200);
+});
+
+test('preserves all 1410 flood rings and coordinates for a live-scale bounded feature', () => {
+  const shell = [[0, -40], [50, -40], [50, 0], [0, 0], [0, -40]];
+  const holes = Array.from({ length: 1_409 }, (_, index) => {
+    const centerX = 0.2 + (index % 47);
+    const centerY = -39.5 + Math.floor(index / 47);
+    const open = Array.from({ length: 40 }, (_unused, vertex) => {
+      const angle = (vertex / 40) * Math.PI * 2;
+      return [centerX + Math.cos(angle) * 0.05, centerY + Math.sin(angle) * 0.05];
+    });
+    return [...open, open[0]];
+  });
+  const result = normalizeOgcPayload('vic-flood-history-2022', {
+    type: 'FeatureCollection', numberMatched: 1_826, numberReturned: 1,
+    features: [feature({ type: 'MultiPolygon', coordinates: [[shell, ...holes]] }, {
+      label: 'Live-scale ring structure', obs_date: '2022-10-20', source: 'Observed evidence',
+    })],
+  }, { maxFeatures: 1 });
+  const outputRings = result.features[0].geometry.coordinates[0].length;
+  assert.equal(outputRings, 1_410);
+  assert.ok(result.sourceStatus.coordinateCount > 56_000);
+  assert.equal(result.sourceStatus.outputCoordinateCount, result.sourceStatus.coordinateCount);
+  assert.ok(result.sourceStatus.outputCoordinateCount <= 60_000);
+  assert.equal(result.sourceStatus.simplifiedFeatures, 0);
   assert.equal(result.sourceStatus.status, 'partial');
 });
 

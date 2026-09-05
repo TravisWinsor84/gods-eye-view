@@ -68,8 +68,9 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxResponseBytes, 1_500_000);
   assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxInputCoordinatesPerFeature, 60_000);
   assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxInputCoordinatesPerResponse, 75_000);
-  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxOutputCoordinatesPerFeature, 4_000);
-  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxTopologyComparisons, 500_000);
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxOutputCoordinatesPerFeature, 60_000);
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxRingsPerFeature, 2_000);
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxTopologyComparisons, 20_000_000);
   assert.match(REGIONAL_SOURCES['vic-epa-priority-sites'].refresh, /absence does not mean uncontaminated or safe/i);
   assert.match(REGIONAL_SOURCES['vic-landfill-register'].refresh, /possible register lag/i);
   assert.match(REGIONAL_SOURCES['vic-recreation-assets'].refresh, /does not prove open or maintained/i);

@@ -46,6 +46,7 @@ const OGC_FEATURE_SOURCES = Object.freeze({
     typeName: 'open-data-platform:renewables',
     propertyName: 'geom,name,type,approval_status,construction_status,lga,size_mw,turbines,ancillary_battery,ancillary_battery_size',
     geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
+    maxTopologyComparisons: 1_000_000,
   }),
   'vic-flood-history-2022': Object.freeze({
     endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
@@ -54,8 +55,10 @@ const OGC_FEATURE_SOURCES = Object.freeze({
     geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
     maxInputCoordinatesPerFeature: 60_000,
     maxInputCoordinatesPerResponse: 75_000,
-    maxOutputCoordinatesPerFeature: 4_000,
-    maxTopologyComparisons: 500_000,
+    maxOutputCoordinatesPerFeature: 60_000,
+    maxRingsPerFeature: 2_000,
+    maxTopologyComparisons: 20_000_000,
+    validateRingsOnly: true,
   }),
   'vic-epa-priority-sites': Object.freeze({
     endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
@@ -293,21 +296,29 @@ function boundsOverlap(left, right) {
 function ringBoundariesIntersect(left, right, leftBounds, rightBounds, budget) {
   consumeTopologyBudget(budget);
   if (!boundsOverlap(leftBounds, rightBounds)) return false;
-  for (let leftIndex = 0; leftIndex < left.length - 1; leftIndex += 1) {
-    const a = left[leftIndex];
-    const b = left[leftIndex + 1];
-    const leftSegment = {
+  const segmentRows = (ringValue, side) => Array.from({ length: ringValue.length - 1 }, (_, index) => {
+    const a = ringValue[index];
+    const b = ringValue[index + 1];
+    return {
+      side, a, b,
       minX: Math.min(a[0], b[0]), minY: Math.min(a[1], b[1]),
       maxX: Math.max(a[0], b[0]), maxY: Math.max(a[1], b[1]),
     };
-    for (let rightIndex = 0; rightIndex < right.length - 1; rightIndex += 1) {
-      consumeTopologyBudget(budget);
-      const c = right[rightIndex];
-      const d = right[rightIndex + 1];
-      if (leftSegment.maxX < Math.min(c[0], d[0]) || Math.max(c[0], d[0]) < leftSegment.minX
-        || leftSegment.maxY < Math.min(c[1], d[1]) || Math.max(c[1], d[1]) < leftSegment.minY) continue;
-      if (segmentsIntersect(a, b, c, d)) return true;
+  });
+  const rows = [...segmentRows(left, 'left'), ...segmentRows(right, 'right')]
+    .sort((a, b) => a.minX - b.minX || a.maxX - b.maxX || a.side.localeCompare(b.side));
+  const active = { left: [], right: [] };
+  for (const current of rows) {
+    for (const side of ['left', 'right']) {
+      active[side] = active[side].filter((candidate) => candidate.maxX >= current.minX);
     }
+    const opposite = current.side === 'left' ? 'right' : 'left';
+    for (const candidate of active[opposite]) {
+      consumeTopologyBudget(budget);
+      if (candidate.maxY < current.minY || current.maxY < candidate.minY) continue;
+      if (segmentsIntersect(current.a, current.b, candidate.a, candidate.b)) return true;
+    }
+    active[current.side].push(current);
   }
   return false;
 }
@@ -417,14 +428,20 @@ function simplifyRing(ringValue, limit, budget) {
   simplified.push(simplified[0]);
   validateRing(simplified, budget);
   if (Math.sign(signedArea(simplified)) !== originalWinding) {
-    throw codedError('invalid OGC geometry winding after simplification', 'INVALID_OGC_GEOMETRY');
+    const rewound = simplified.slice(0, -1).reverse();
+    rewound.push(rewound[0]);
+    validateRing(rewound, budget);
+    if (Math.sign(signedArea(rewound)) !== originalWinding) {
+      throw codedError('invalid OGC geometry winding after simplification', 'INVALID_OGC_GEOMETRY');
+    }
+    return rewound;
   }
   return simplified;
 }
 
-function simplifyPolygons(polygons, maxOutputCoordinates, budget, errorLabel) {
+function simplifyPolygons(polygons, maxOutputCoordinates, maxRings, budget, errorLabel) {
   const rings = polygons.flat();
-  if (rings.length > MAX_RINGS_PER_FEATURE || rings.length * 4 > maxOutputCoordinates) {
+  if (rings.length > maxRings || rings.length * 4 > maxOutputCoordinates) {
     throw codedError(`invalid OGC ${errorLabel} geometry size`, 'INVALID_OGC_GEOMETRY');
   }
   const current = rings.reduce((sum, item) => sum + item.length, 0);
@@ -458,22 +475,23 @@ function normalizeGeometry(sourceId, geometry, meter) {
     throw codedError('invalid OGC polygon geometry', 'INVALID_OGC_GEOMETRY');
   }
   let ringCount = 0;
+  const maxRings = source.maxRingsPerFeature ?? MAX_RINGS_PER_FEATURE;
   let polygons = rawPolygons.map((polygon) => {
     if (!Array.isArray(polygon) || !polygon.length) throw codedError('invalid OGC geometry nesting', 'INVALID_OGC_GEOMETRY');
     ringCount += polygon.length;
-    if (ringCount > MAX_RINGS_PER_FEATURE) throw codedError('invalid OGC geometry ring count', 'INVALID_OGC_GEOMETRY');
+    if (ringCount > maxRings) throw codedError('invalid OGC geometry ring count', 'INVALID_OGC_GEOMETRY');
     return polygon.map((item) => ring(item, meter));
   });
-  validatePolygonTopology(polygons, meter.topology);
   const maxOutputCoordinates = source.maxOutputCoordinatesPerFeature
     ?? (sourceId === 'vic-heritage' ? MAX_HERITAGE_OUTPUT_COORDINATES : null);
+  if (!source.validateRingsOnly) validatePolygonTopology(polygons, meter.topology);
   if (maxOutputCoordinates !== null) {
-    const simplified = simplifyPolygons(polygons, maxOutputCoordinates, meter.topology,
+    const simplified = simplifyPolygons(polygons, maxOutputCoordinates, maxRings, meter.topology,
       sourceId === 'vic-heritage' ? 'heritage' : 'flood');
-    if (simplified !== polygons) {
+    if (simplified !== polygons && !source.validateRingsOnly) {
       validatePolygonTopology(simplified, meter.topology);
-      meter.simplifiedFeatures += 1;
     }
+    if (simplified !== polygons) meter.simplifiedFeatures += 1;
     polygons = simplified;
   }
   return {
@@ -759,7 +777,8 @@ export const OGC_GEOMETRY_LIMITS = Object.freeze({
   floodHistory2022: Object.freeze({
     maxCoordinatesPerFeature: 60_000,
     maxCoordinatesPerResponse: 75_000,
-    maxOutputCoordinatesPerFeature: 4_000,
-    maxTopologyComparisons: 500_000,
+    maxOutputCoordinatesPerFeature: 60_000,
+    maxRingsPerFeature: 2_000,
+    maxTopologyComparisons: 20_000_000,
   }),
 });

@@ -202,8 +202,8 @@ export const REGIONAL_SOURCES = Object.freeze({
     refresh: 'historical incomplete October 2022 evidence; one-feature viewport cap; not current extent, peak extent, flash-flood coverage or warning',
     credit: OGC_SOURCE_CREDITS['vic-flood-history-2022'], credential: 'none', runtimeEligible: true, maxFeatures: 1,
     maxResponseBytes: 1_500_000, maxInputCoordinatesPerFeature: 60_000,
-    maxInputCoordinatesPerResponse: 75_000, maxOutputCoordinatesPerFeature: 4_000,
-    maxTopologyComparisons: 500_000,
+    maxInputCoordinatesPerResponse: 75_000, maxOutputCoordinatesPerFeature: 60_000,
+    maxRingsPerFeature: 2_000, maxTopologyComparisons: 20_000_000,
   }),
   'vic-epa-priority-sites': Object.freeze({
     name: 'EPA Victoria Priority Sites Register', source: 'DataVic', publisher: 'Environment Protection Authority Victoria',

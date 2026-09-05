@@ -143,6 +143,23 @@ test('regional proxy delegates the fixed DataVic waste snapshot and reports its 
   assert.equal(JSON.parse(response.body).sourceStatus.snapshot, 'October 2025');
 });
 
+test('regional proxy labels DataVic waste last-good as stale in both body and header', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    dataVicWasteFacilities: {
+      async load() {
+        return {
+          type: 'FeatureCollection', features: [],
+          sourceStatus: { status: 'stale', cache: 'stale', snapshot: 'October 2025' },
+        };
+      },
+    },
+  }), `/api/regional/vic-waste-facilities${MELBOURNE_BOUNDS}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-cache'], 'STALE');
+  assert.equal(response.headers['x-regional-status'], 'stale');
+  assert.equal(JSON.parse(response.body).sourceStatus.status, 'stale');
+});
+
 test('regional proxy fetches only a fixed high-zoom Vicmap parcel query and strips provider IDs', async () => {
   const requests = [];
   const middleware = createRegionalProxy({

@@ -413,7 +413,9 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
       try {
         const body = await wasteClient.load({ bbox, maxFeatures: source.maxFeatures });
         const sourceStatus = body?.sourceStatus || {};
-        const status = sourceStatus.status === 'current' ? 'fresh' : 'degraded';
+        const status = sourceStatus.status === 'stale'
+          ? 'stale'
+          : sourceStatus.status === 'current' ? 'fresh' : 'degraded';
         const cache = cleanIndexedCacheHeader(sourceStatus.cache);
         return sendJson(res, 200, body, {
           'X-Regional-Source': sourceId,
