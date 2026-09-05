@@ -163,6 +163,26 @@ test('regional proxy fetches fixed OGC GeoJSON and strips provider IDs and unsaf
   assert.doesNotMatch(response.body, /internal\.99|secret note|"id":99/);
 });
 
+test('regional proxy sanitizes exhausted OGC topology validation as invalid provider data', async () => {
+  const shell = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
+  const holes = Array.from({ length: 500 }, (_, index) => {
+    const column = index % 25;
+    const row = Math.floor(index / 25);
+    const west = 0.2 + column * 0.38;
+    const south = 0.2 + row * 0.45;
+    return [[west, south], [west + 0.1, south], [west + 0.1, south + 0.1], [west, south + 0.1], [west, south]];
+  });
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => regionalResponseJson({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [shell, ...holes] }, properties: { name: 'Excessive topology work' } }],
+    }),
+  }), '/api/regional/vic-parks?west=0&south=0&east=10&north=10');
+
+  assert.equal(response.status, 502);
+  assert.deepEqual(JSON.parse(response.body), { error: 'regional source returned invalid data' });
+});
+
 test('regional proxy rejects OGC redirects, non-JSON media and oversized streams with sanitized errors', async () => {
   const route = `/api/regional/vic-parks${MELBOURNE_BOUNDS}`;
   const cases = [

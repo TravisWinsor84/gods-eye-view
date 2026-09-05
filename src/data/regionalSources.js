@@ -154,7 +154,8 @@ export const REGIONAL_SOURCES = Object.freeze({
   }),
   'au-dea-hotspots': Object.freeze({
     name: 'Digital Earth Australia Hotspots', source: 'Digital Earth Australia', publisher: 'Geoscience Australia',
-    endpoint: 'https://hotspots.dea.ga.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    endpoint: 'https://hotspots.dea.ga.gov.au/geoserver/wfs',
+    licence: 'Dataset-specific catalogue licence unspecified; fallback: Creative Commons Attribution 4.0 International under Geoscience Australia general copyright terms, subject to accompanying notices.',
     geometry: 'point', refreshMs: 300_000, maxStaleMs: 900_000,
     refresh: 'five-minute viewport cache over the fixed three-day observation layer; last-good limited to fifteen minutes',
     credit: OGC_SOURCE_CREDITS['au-dea-hotspots'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,

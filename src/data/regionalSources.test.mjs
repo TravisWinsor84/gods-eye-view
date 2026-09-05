@@ -47,6 +47,8 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['au-health-facilities'].geometry, 'point');
   assert.equal(REGIONAL_SOURCES['au-place-names'].credential, 'none');
   assert.equal(REGIONAL_SOURCES['au-dea-hotspots'].geometry, 'point');
+  assert.equal(REGIONAL_SOURCES['au-dea-hotspots'].licence, 'Dataset-specific catalogue licence unspecified; fallback: Creative Commons Attribution 4.0 International under Geoscience Australia general copyright terms, subject to accompanying notices.');
+  assert.match(REGIONAL_SOURCES['au-dea-hotspots'].credit, /Commonwealth of Australia \(Geoscience Australia\) 2026/);
   assert.equal(REGIONAL_SOURCES['vic-parks'].geometry, 'polygon');
   assert.equal(REGIONAL_SOURCES['vic-recreation-tracks'].geometry, 'line');
   assert.equal(REGIONAL_SOURCES['vic-heritage'].refresh, 'unknown publisher cadence; daily viewport cache');
@@ -396,6 +398,7 @@ test('attribution is exact, source-scoped, and rejects unknown IDs', () => {
   assert.match(regionalSourceAttribution('au-emergency-facilities'), /Commonwealth of Australia \(Geoscience Australia\) 2023/);
   assert.match(regionalSourceAttribution('au-health-facilities'), /G-NAF © Geoscape Australia/);
   assert.equal(regionalSourceAttribution('au-place-names'), 'Geoscience Australia');
+  assert.match(regionalSourceAttribution('au-dea-hotspots'), /Creative Commons Attribution 4\.0 International Licence\. Observe and retain any copyright or related notices that may accompany this material as part of the attribution/);
   assert.equal(regionalSourceAttribution('melbourne-parking-live'), 'City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.');
   assert.throws(() => regionalSourceAttribution('nope'), /Unknown regional source: nope/);
 });

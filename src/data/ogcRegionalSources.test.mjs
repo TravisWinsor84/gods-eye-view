@@ -149,6 +149,87 @@ test('heritage simplification stays bounded, closed and deterministic while inva
   }, { maxFeatures: 10 }), /invalid OGC geometry/);
 });
 
+test('rejects polygon holes outside or crossing the shell', () => {
+  const shell = [[144, -38], [146, -38], [146, -36], [144, -36], [144, -38]];
+  const outsideHole = [[147, -37.8], [147.2, -37.8], [147.2, -37.6], [147, -37.6], [147, -37.8]];
+  const crossingHole = [[145.8, -37.8], [146.2, -37.8], [146.2, -37.4], [145.8, -37.4], [145.8, -37.8]];
+
+  for (const hole of [outsideHole, crossingHole]) {
+    assert.throws(() => normalizeOgcFeature('vic-parks', feature({
+      type: 'Polygon', coordinates: [shell, hole],
+    }, { name: 'Invalid reserve' })), /invalid OGC polygon topology/);
+  }
+});
+
+test('rejects polygon holes that overlap, touch or nest', () => {
+  const shell = [[144, -38], [148, -38], [148, -34], [144, -34], [144, -38]];
+  const left = [[145, -37], [146, -37], [146, -36], [145, -36], [145, -37]];
+  const invalidPairs = [
+    [[145.5, -36.5], [146.5, -36.5], [146.5, -35.5], [145.5, -35.5], [145.5, -36.5]],
+    [[146, -37], [147, -37], [147, -36], [146, -36], [146, -37]],
+    [[145.2, -36.8], [145.8, -36.8], [145.8, -36.2], [145.2, -36.2], [145.2, -36.8]],
+  ];
+
+  for (const right of invalidPairs) {
+    assert.throws(() => normalizeOgcFeature('vic-parks', feature({
+      type: 'Polygon', coordinates: [shell, left, right],
+    }, { name: 'Invalid reserve holes' })), /invalid OGC polygon topology/);
+  }
+});
+
+test('rejects overlapping, touching or contained sibling multipolygon members', () => {
+  const left = [[[144, -38], [146, -38], [146, -36], [144, -36], [144, -38]]];
+  const invalidSiblings = [
+    [[[145, -37], [147, -37], [147, -35], [145, -35], [145, -37]]],
+    [[[146, -38], [148, -38], [148, -36], [146, -36], [146, -38]]],
+    [[[144.5, -37.5], [145.5, -37.5], [145.5, -36.5], [144.5, -36.5], [144.5, -37.5]]],
+  ];
+
+  for (const right of invalidSiblings) {
+    assert.throws(() => normalizeOgcFeature('vic-parks', feature({
+      type: 'MultiPolygon', coordinates: [left, right],
+    }, { name: 'Invalid reserve members' })), /invalid OGC multipolygon topology/);
+  }
+});
+
+test('accepts valid holes without imposing GeoJSON winding direction', () => {
+  const shell = [[144, -38], [146, -38], [146, -36], [144, -36], [144, -38]];
+  const sameWindingHole = [[144.5, -37.5], [145, -37.5], [145, -37], [144.5, -37], [144.5, -37.5]];
+  const normalized = normalizeOgcFeature('vic-parks', feature({
+    type: 'Polygon', coordinates: [shell, sameWindingHole],
+  }, { name: 'Valid reserve' }));
+
+  assert.deepEqual(normalized.geometry.coordinates, [shell, sameWindingHole]);
+});
+
+test('rejects heritage topology that becomes invalid only after simplification', () => {
+  const shell = [];
+  for (let index = 0; index <= 2_401; index += 1) shell.push([index * 10 / 2_401, 0]);
+  shell.push([10, 4], [12, 5], [10, 6], [10, 10]);
+  for (let index = 1; index <= 2_599; index += 1) shell.push([10 - index * 10 / 2_599, 10]);
+  shell.push([0, 0]);
+  const holeInSpike = [[10.6, 4.8], [11, 5], [10.6, 5.2], [10.5, 5], [10.6, 4.8]];
+
+  assert.throws(() => normalizeOgcFeature('vic-heritage', feature({
+    type: 'Polygon', coordinates: [shell, holeInSpike],
+  }, { site_name: 'Topology-changing simplification' })), /invalid OGC polygon topology/);
+});
+
+test('rejects polygon relationship validation when its bounded comparison budget is exceeded', () => {
+  const shell = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]];
+  const holes = Array.from({ length: 500 }, (_, index) => {
+    const column = index % 25;
+    const row = Math.floor(index / 25);
+    const west = 0.2 + column * 0.38;
+    const south = 0.2 + row * 0.45;
+    return [[west, south], [west + 0.1, south], [west + 0.1, south + 0.1], [west, south + 0.1], [west, south]];
+  });
+
+  assert.throws(() => normalizeOgcFeature('vic-parks', feature({
+    type: 'Polygon', coordinates: [shell, ...holes],
+  }, { name: 'Excessive topology work' })), (error) => error?.code === 'OGC_TOPOLOGY_LIMIT');
+});
+
 test('accepts bounded provider geometry with duplicate consecutive vertices or 65 polygons', () => {
   const park = normalizeOgcFeature('vic-parks', feature({
     type: 'Polygon',
@@ -198,8 +279,24 @@ test('marks an exact-count WFS response partial when collection metadata reports
   }, { maxFeatures: 1 }), /invalid OGC collection counts/);
 });
 
+test('rejects WFS numberMatched below numberReturned or the actual feature count', () => {
+  const row = feature(POLYGON, { site_name: 'Contradictory counts' });
+  assert.throws(() => normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', numberMatched: 0, numberReturned: 1, features: [row],
+  }, { maxFeatures: 1 }), /invalid OGC collection counts/);
+  assert.throws(() => normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', numberMatched: 0, features: [row],
+  }, { maxFeatures: 1 }), /invalid OGC collection counts/);
+  assert.throws(() => normalizeOgcPayload('vic-heritage', {
+    type: 'FeatureCollection', numberMatched: 2, totalFeatures: 3, features: [row],
+  }, { maxFeatures: 1 }), /invalid OGC collection counts/);
+});
+
 test('publishes fixed provider attribution contracts', () => {
-  assert.equal(OGC_SOURCE_CREDITS['au-dea-hotspots'], 'Digital Earth Australia Hotspots');
+  assert.equal(
+    OGC_SOURCE_CREDITS['au-dea-hotspots'],
+    '© Commonwealth of Australia (Geoscience Australia) 2026. This material is licensed under the Creative Commons Attribution 4.0 International Licence. Observe and retain any copyright or related notices that may accompany this material as part of the attribution.',
+  );
   assert.equal(OGC_SOURCE_CREDITS['vic-parks'], 'State of Victoria (DataVic)');
   assert.equal(OGC_SOURCE_CREDITS['vic-recreation-tracks'], 'State of Victoria (DataVic)');
   assert.equal(OGC_SOURCE_CREDITS['vic-heritage'], 'State of Victoria (DataVic)');

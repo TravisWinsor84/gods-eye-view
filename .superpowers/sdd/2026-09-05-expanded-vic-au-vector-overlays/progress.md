@@ -228,3 +228,18 @@
   allocation-benchmark skip; production build passed at 163 modules; `git diff
   --check` passed. No pack membership, push or deployment occurred; independent
   review remains the next gate.
+- Task 4 review fixes were driven RED-first for full Polygon/MultiPolygon
+  relationships, pre/post-heritage-simplification validation, a shared bounded
+  topology budget, contradictory WFS totals and the exact 2026 Geoscience
+  Australia fallback attribution. The proxy now classifies topology-budget
+  rejection as sanitized invalid provider data.
+- Fresh bounded Task 4 smoke returned 200 for DEA (839 points, partial/capped
+  against 2,173 matches), parks (21 current multipolygons) and tracks (7 current
+  multilines). Heritage failed closed with sanitized HTTP 502 because current
+  row 6 contains two sibling polygon members violating the required no-overlap,
+  no-touch and no-containment contract. No provider IDs or free text were
+  retained in evidence; no push or deployment occurred.
+- Task 4 review-fix verification passed: focused 82/82; full `npm test` 2,865
+  passed, 0 failed and 1 expected skip, plus two Node-24-calibrated allocation
+  microbenchmarks skipped under Node 26.8.1; production build passed with 163
+  modules transformed and the existing large-chunk advisory.

@@ -99,3 +99,60 @@ name/type/manager; tracks name/classification; heritage site/object type.
 
 Independent review and Task 6 browser-visible category integration remain
 separate gates.
+
+## Independent review fix round
+
+The three review findings were reproduced RED before implementation. New tests
+cover outside and shell-crossing holes; overlapping, touching and nested holes;
+overlapping, touching and contained sibling multipolygon members; preservation
+of valid same-direction rings; topology made invalid only by heritage
+simplification; shared validation-budget exhaustion; `numberMatched` below the
+returned/actual count; conflicting numeric total metadata; and the exact DEA
+fallback licence and attribution contract. A proxy-level RED also proved that
+topology-budget exhaustion was being mislabeled as a transient outage.
+
+Polygon admission now validates shell/hole and sibling-polygon relationships
+before heritage simplification and validates them again afterwards. It does not
+require a particular GeoJSON winding direction, while simplification still
+must preserve each ring's original orientation. Ring scans, inter-ring checks,
+point containment and pair bounds checks share a 100,000-comparison budget per
+normalization and retain only linear ring/bounds storage. Budget exhaustion is
+sanitized by the proxy as invalid provider data. WFS numeric totals must be
+non-negative, at least the actual/returned feature count, and consistent with
+one another; contradictory metadata cannot produce `current` output.
+
+The current Data.gov.au catalogue records for both DEA Hotspots and its WFS
+state `notspecified` for the dataset-specific licence. The registered fallback
+now uses Geoscience Australia's general copyright terms and exact current
+attribution: `© Commonwealth of Australia (Geoscience Australia) 2026`, with
+CC BY 4.0 and the requirement to observe and retain accompanying copyright or
+related notices. Product-name-only credit was removed from code, catalogue and
+documentation.
+
+### Fresh bounded live smoke — review fix
+
+All four calls used `createRegionalProxy()` with the existing fixed requests,
+timeouts, redirect/media checks, 2 MB stream cap and production normalizers.
+Evidence retained only counts, geometry types and sanitized status.
+
+| Source | HTTP | Normalized result | Status |
+| --- | ---: | --- | --- |
+| DEA hotspots | 200 | 839 points from 1,000 rows; 161 deterministic duplicates removed; 2,173 matches | `partial`, capped |
+| Victorian parks | 200 | 21 multipolygons | `current` |
+| Recreation tracks | 200 | 7 multilines | `current` |
+| Victorian heritage | 502 | No geometry admitted | Sanitized invalid data: current row 6 has two sibling polygon members that violate the required no-overlap/touch/contain topology contract |
+
+The heritage failure is intentional fail-closed behavior under the requested
+contract, not a successful live data result or a transient provider outage. No
+provider IDs or free-text fields were copied into evidence.
+
+### Review-fix verification
+
+- Focused command: 82 passed, 0 failed, 0 skipped.
+- Full `npm test`: 2,865 passed, 0 failed, 1 expected skip. The runner also
+  reported two skipped allocation microbenchmarks because this shell uses Node
+  26.8.1 while their budgets are calibrated for Node 24.
+- `npm run build`: passed with Vite 6.4.3; 163 modules transformed. The existing
+  large-chunk advisory was emitted.
+- `git diff --check`: passed before staging.
+- No push or deployment was performed.

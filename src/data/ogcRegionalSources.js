@@ -6,7 +6,7 @@ const MAX_GEOMETRY_DEPTH = 4;
 const MAX_HERITAGE_OUTPUT_COORDINATES = 4_000;
 const MAX_POLYGONS_PER_FEATURE = 256;
 const MAX_RINGS_PER_FEATURE = 512;
-const MAX_TOPOLOGY_COMPARISONS = 2_000_000;
+const MAX_TOPOLOGY_COMPARISONS = 100_000;
 
 export const OGC_MAX_RESPONSE_BYTES = 2_000_000;
 
@@ -38,7 +38,7 @@ const OGC_FEATURE_SOURCES = Object.freeze({
 });
 
 export const OGC_SOURCE_CREDITS = Object.freeze({
-  'au-dea-hotspots': 'Digital Earth Australia Hotspots',
+  'au-dea-hotspots': '© Commonwealth of Australia (Geoscience Australia) 2026. This material is licensed under the Creative Commons Attribution 4.0 International Licence. Observe and retain any copyright or related notices that may accompany this material as part of the attribution.',
   'vic-parks': 'State of Victoria (DataVic)',
   'vic-recreation-tracks': 'State of Victoria (DataVic)',
   'vic-heritage': 'State of Victoria (DataVic)',
@@ -156,7 +156,14 @@ function signedArea(ring) {
   return area / 2;
 }
 
-function validateRing(ring, { checkIntersections = true } = {}) {
+function consumeTopologyBudget(budget, count = 1) {
+  budget.comparisons += count;
+  if (budget.comparisons > MAX_TOPOLOGY_COMPARISONS) {
+    throw codedError('OGC geometry topology validation limit exceeded', 'OGC_TOPOLOGY_LIMIT');
+  }
+}
+
+function validateRing(ring, budget, { checkIntersections = true } = {}) {
   if (ring.length < 4 || !samePosition(ring[0], ring.at(-1))) {
     throw codedError('invalid OGC geometry ring', 'INVALID_OGC_GEOMETRY');
   }
@@ -174,20 +181,17 @@ function validateRing(ring, { checkIntersections = true } = {}) {
     maxY: Math.max(ring[index][1], ring[index + 1][1]),
   })).sort((left, right) => left.minX - right.minX || left.index - right.index);
   const active = [];
-  let comparisons = 0;
   for (const current of segments) {
     for (let index = active.length - 1; index >= 0; index -= 1) {
+      consumeTopologyBudget(budget);
       if (active[index].maxX < current.minX) active.splice(index, 1);
     }
     for (const prior of active) {
+      consumeTopologyBudget(budget);
       if (prior.maxY < current.minY || current.maxY < prior.minY) continue;
       const adjacent = Math.abs(prior.index - current.index) === 1
         || (Math.min(prior.index, current.index) === 0 && Math.max(prior.index, current.index) === segmentCount - 1);
       if (adjacent) continue;
-      comparisons += 1;
-      if (comparisons > MAX_TOPOLOGY_COMPARISONS) {
-        throw codedError('OGC geometry topology validation limit exceeded', 'OGC_COORDINATE_LIMIT');
-      }
       if (segmentsIntersect(
         ring[prior.index], ring[prior.index + 1], ring[current.index], ring[current.index + 1],
       )) {
@@ -207,8 +211,123 @@ function ring(value, meter) {
   if (!Array.isArray(value)) throw codedError('invalid OGC geometry ring', 'INVALID_OGC_GEOMETRY');
   const input = value.map((item) => position(item, meter));
   const normalized = input.filter((item, index) => index === 0 || !samePosition(item, input[index - 1]));
-  validateRing(normalized);
+  validateRing(normalized, meter.topology);
   return normalized;
+}
+
+function ringBounds(ringValue) {
+  const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  for (let index = 0; index < ringValue.length - 1; index += 1) {
+    bounds.minX = Math.min(bounds.minX, ringValue[index][0]);
+    bounds.minY = Math.min(bounds.minY, ringValue[index][1]);
+    bounds.maxX = Math.max(bounds.maxX, ringValue[index][0]);
+    bounds.maxY = Math.max(bounds.maxY, ringValue[index][1]);
+  }
+  return bounds;
+}
+
+function boundsOverlap(left, right) {
+  return left.minX <= right.maxX && right.minX <= left.maxX
+    && left.minY <= right.maxY && right.minY <= left.maxY;
+}
+
+function ringBoundariesIntersect(left, right, leftBounds, rightBounds, budget) {
+  consumeTopologyBudget(budget);
+  if (!boundsOverlap(leftBounds, rightBounds)) return false;
+  for (let leftIndex = 0; leftIndex < left.length - 1; leftIndex += 1) {
+    const a = left[leftIndex];
+    const b = left[leftIndex + 1];
+    const leftSegment = {
+      minX: Math.min(a[0], b[0]), minY: Math.min(a[1], b[1]),
+      maxX: Math.max(a[0], b[0]), maxY: Math.max(a[1], b[1]),
+    };
+    for (let rightIndex = 0; rightIndex < right.length - 1; rightIndex += 1) {
+      consumeTopologyBudget(budget);
+      const c = right[rightIndex];
+      const d = right[rightIndex + 1];
+      if (leftSegment.maxX < Math.min(c[0], d[0]) || Math.max(c[0], d[0]) < leftSegment.minX
+        || leftSegment.maxY < Math.min(c[1], d[1]) || Math.max(c[1], d[1]) < leftSegment.minY) continue;
+      if (segmentsIntersect(a, b, c, d)) return true;
+    }
+  }
+  return false;
+}
+
+function pointInRing(point, ringValue, bounds, budget) {
+  if (point[0] < bounds.minX || point[0] > bounds.maxX || point[1] < bounds.minY || point[1] > bounds.maxY) {
+    return 'outside';
+  }
+  let inside = false;
+  for (let index = 0; index < ringValue.length - 1; index += 1) {
+    consumeTopologyBudget(budget);
+    const left = ringValue[index];
+    const right = ringValue[index + 1];
+    if (orientation(left, point, right) === 0 && onSegment(left, point, right)) return 'boundary';
+    if ((left[1] > point[1]) !== (right[1] > point[1])) {
+      const longitude = left[0] + ((point[1] - left[1]) * (right[0] - left[0])) / (right[1] - left[1]);
+      if (longitude > point[0]) inside = !inside;
+    }
+  }
+  return inside ? 'inside' : 'outside';
+}
+
+function polygonContainsPoint(point, polygon, infos, budget) {
+  if (pointInRing(point, polygon[0], infos[0], budget) !== 'inside') return false;
+  for (let index = 1; index < polygon.length; index += 1) {
+    if (pointInRing(point, polygon[index], infos[index], budget) !== 'outside') return false;
+  }
+  return true;
+}
+
+function validatePolygonTopology(polygons, budget) {
+  const polygonInfos = polygons.map((polygon) => polygon.map(ringBounds));
+  for (let polygonIndex = 0; polygonIndex < polygons.length; polygonIndex += 1) {
+    const polygon = polygons[polygonIndex];
+    const infos = polygonInfos[polygonIndex];
+    const shell = polygon[0];
+    const shellBounds = infos[0];
+    for (let holeIndex = 1; holeIndex < polygon.length; holeIndex += 1) {
+      const hole = polygon[holeIndex];
+      const holeBounds = infos[holeIndex];
+      if (ringBoundariesIntersect(shell, hole, shellBounds, holeBounds, budget)
+        || pointInRing(hole[0], shell, shellBounds, budget) !== 'inside') {
+        throw codedError('invalid OGC polygon topology', 'INVALID_OGC_GEOMETRY');
+      }
+      for (let priorIndex = 1; priorIndex < holeIndex; priorIndex += 1) {
+        consumeTopologyBudget(budget);
+        const prior = polygon[priorIndex];
+        const priorBounds = infos[priorIndex];
+        if (!boundsOverlap(priorBounds, holeBounds)) continue;
+        if (ringBoundariesIntersect(prior, hole, priorBounds, holeBounds, budget)
+          || pointInRing(hole[0], prior, priorBounds, budget) !== 'outside'
+          || pointInRing(prior[0], hole, holeBounds, budget) !== 'outside') {
+          throw codedError('invalid OGC polygon topology', 'INVALID_OGC_GEOMETRY');
+        }
+      }
+    }
+  }
+
+  for (let rightIndex = 1; rightIndex < polygons.length; rightIndex += 1) {
+    const right = polygons[rightIndex];
+    const rightInfos = polygonInfos[rightIndex];
+    for (let leftIndex = 0; leftIndex < rightIndex; leftIndex += 1) {
+      consumeTopologyBudget(budget);
+      const left = polygons[leftIndex];
+      const leftInfos = polygonInfos[leftIndex];
+      if (!boundsOverlap(leftInfos[0], rightInfos[0])) continue;
+      for (let leftRing = 0; leftRing < left.length; leftRing += 1) {
+        for (let rightRing = 0; rightRing < right.length; rightRing += 1) {
+          if (ringBoundariesIntersect(
+            left[leftRing], right[rightRing], leftInfos[leftRing], rightInfos[rightRing], budget,
+          )) throw codedError('invalid OGC multipolygon topology', 'INVALID_OGC_GEOMETRY');
+        }
+      }
+      if (polygonContainsPoint(left[0][0], right, rightInfos, budget)
+        || polygonContainsPoint(right[0][0], left, leftInfos, budget)) {
+        throw codedError('invalid OGC multipolygon topology', 'INVALID_OGC_GEOMETRY');
+      }
+    }
+  }
 }
 
 function assertGeometryNesting(coordinates) {
@@ -227,7 +346,7 @@ function assertGeometryNesting(coordinates) {
   }
 }
 
-function simplifyRing(ringValue, limit) {
+function simplifyRing(ringValue, limit, budget) {
   if (ringValue.length <= limit) return ringValue;
   const originalWinding = Math.sign(signedArea(ringValue));
   const openLength = ringValue.length - 1;
@@ -237,14 +356,14 @@ function simplifyRing(ringValue, limit) {
     simplified.push(ringValue[Math.floor((index * openLength) / keepOpen)]);
   }
   simplified.push(simplified[0]);
-  validateRing(simplified);
+  validateRing(simplified, budget);
   if (Math.sign(signedArea(simplified)) !== originalWinding) {
     throw codedError('invalid OGC geometry winding after simplification', 'INVALID_OGC_GEOMETRY');
   }
   return simplified;
 }
 
-function simplifyHeritagePolygons(polygons) {
+function simplifyHeritagePolygons(polygons, budget) {
   const rings = polygons.flat();
   if (rings.length > MAX_RINGS_PER_FEATURE || rings.length * 4 > MAX_HERITAGE_OUTPUT_COORDINATES) {
     throw codedError('OGC heritage geometry is excessive', 'OGC_COORDINATE_LIMIT');
@@ -261,7 +380,7 @@ function simplifyHeritagePolygons(polygons) {
     if (limits[index] < rings[index].length) { limits[index] += 1; remaining -= 1; }
   }
   let ringIndex = 0;
-  return polygons.map((polygon) => polygon.map((item) => simplifyRing(item, limits[ringIndex++])));
+  return polygons.map((polygon) => polygon.map((item) => simplifyRing(item, limits[ringIndex++], budget)));
 }
 
 function normalizeGeometry(sourceId, geometry, meter) {
@@ -286,7 +405,11 @@ function normalizeGeometry(sourceId, geometry, meter) {
     if (ringCount > MAX_RINGS_PER_FEATURE) throw codedError('OGC geometry ring limit exceeded', 'OGC_COORDINATE_LIMIT');
     return polygon.map((item) => ring(item, meter));
   });
-  if (sourceId === 'vic-heritage') polygons = simplifyHeritagePolygons(polygons);
+  validatePolygonTopology(polygons, meter.topology);
+  if (sourceId === 'vic-heritage') {
+    polygons = simplifyHeritagePolygons(polygons, meter.topology);
+    validatePolygonTopology(polygons, meter.topology);
+  }
   return {
     type: geometry.type,
     coordinates: geometry.type === 'Polygon' ? polygons[0] : polygons,
@@ -364,7 +487,7 @@ function normalizedFeature(sourceId, row, meter) {
 
 /** Normalize one WFS feature without retaining provider identifiers. */
 export function normalizeOgcFeature(sourceId, row) {
-  const normalized = normalizedFeature(sourceId, row, { feature: 0, response: 0 });
+  const normalized = normalizedFeature(sourceId, row, { feature: 0, response: 0, topology: { comparisons: 0 } });
   return normalized ? {
     ...normalized.feature,
     id: `ogc-${sourceId}-${stableHash(normalized.identity)}`,
@@ -383,16 +506,26 @@ export function normalizeOgcPayload(sourceId, payload, { maxFeatures = MAX_FEATU
     && (!Number.isSafeInteger(payload.numberReturned) || payload.numberReturned < 0 || payload.numberReturned !== payload.features.length)) {
     throw codedError('invalid OGC collection counts', 'INVALID_OGC_RESPONSE');
   }
-  const matchedCandidate = Number.isSafeInteger(payload.numberMatched) && payload.numberMatched >= 0
-    ? payload.numberMatched
-    : Number.isSafeInteger(payload.totalFeatures) && payload.totalFeatures >= 0
-      ? payload.totalFeatures
-      : null;
+  const countCandidate = (value, allowUnknown = false) => {
+    if (value === undefined || (allowUnknown && value === 'unknown')) return null;
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw codedError('invalid OGC collection counts', 'INVALID_OGC_RESPONSE');
+    }
+    return value;
+  };
+  const numberMatched = countCandidate(payload.numberMatched, true);
+  const totalFeatures = countCandidate(payload.totalFeatures, true);
+  if ((numberMatched !== null && numberMatched < payload.features.length)
+    || (totalFeatures !== null && totalFeatures < payload.features.length)
+    || (numberMatched !== null && totalFeatures !== null && numberMatched !== totalFeatures)) {
+    throw codedError('invalid OGC collection counts', 'INVALID_OGC_RESPONSE');
+  }
+  const matchedCandidate = numberMatched ?? totalFeatures;
   const capped = matchedCandidate === null
     ? payload.features.length === maxFeatures
     : matchedCandidate > payload.features.length;
 
-  const meter = { feature: 0, response: 0 };
+  const meter = { feature: 0, response: 0, topology: { comparisons: 0 } };
   const byIdentity = new Map();
   let invalidFeatures = 0;
   let duplicateFeatures = 0;
@@ -429,4 +562,5 @@ export const OGC_GEOMETRY_LIMITS = Object.freeze({
   maxCoordinatesPerFeature: MAX_INPUT_COORDINATES_PER_FEATURE,
   maxCoordinatesPerResponse: MAX_INPUT_COORDINATES_PER_RESPONSE,
   maxHeritageOutputCoordinates: MAX_HERITAGE_OUTPUT_COORDINATES,
+  maxTopologyComparisons: MAX_TOPOLOGY_COMPARISONS,
 });

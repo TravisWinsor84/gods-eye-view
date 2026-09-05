@@ -63,7 +63,7 @@ only after its authenticated contract has been validated.
 | `au-emergency-facilities` | Geoscience Australia, [Emergency Management Facilities ArcGIS service](https://services.ga.gov.au/gis/rest/services/Emergency_Management_Facilities/MapServer) | Creative Commons Attribution 4.0 International; incorporates G-NAF under the G-NAF End User Licence Agreement | `© Commonwealth of Australia (Geoscience Australia) 2023. This material is released under the Creative Commons Attribution 4.0 International Licence. Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.` | Point | Implemented registry, sanitizer and daily viewport proxy; not assigned to a visible category pack until Task 6 |
 | `au-health-facilities` | Geoscience Australia / Healthdirect, [National HealthDirect Health Facilities ArcGIS service](https://services.ga.gov.au/gis/rest/services/National_HealthDirect_Health_Facilities/MapServer) | The live service states Creative Commons Attribution 4.0 International and incorporated G-NAF terms; the Data.gov catalogue licence remains unspecified | `© Commonwealth of Australia (Geoscience Australia) 2025`<br>`This material is released under the Creative Commons Attribution 4.0 International Licence.`<br><br>`Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.` | Point | Implemented registry, sanitizer and daily viewport proxy; periodic reference directory, not assigned to a visible category pack until Task 6 |
 | `au-place-names` | Geoscience Australia, [Composite Gazetteer of Australia ArcGIS service](https://services.ga.gov.au/gis/rest/services/Composite_Gazetteer_of_Australia/MapServer) | Service attribution: Geoscience Australia; compiled reference data | `Geoscience Australia` | Point | Implemented registry, sanitizer and weekly viewport proxy; not assigned to a visible category pack until Task 6 |
-| `au-dea-hotspots` | Geoscience Australia / Digital Earth Australia, [DEA Hotspots WFS](https://hotspots.dea.ga.gov.au/geoserver/wfs), fixed `public:hotspots_three_days` layer | Creative Commons Attribution 4.0 International | `Digital Earth Australia Hotspots` | Point | Implemented five-minute viewport cache over the fixed three-day observation layer; last-good limited to fifteen minutes; satellite observation context only, not warning or evacuation advice; not assigned to a visible category pack until Task 6 |
+| `au-dea-hotspots` | Geoscience Australia / Digital Earth Australia, [DEA Hotspots WFS](https://hotspots.dea.ga.gov.au/geoserver/wfs), fixed `public:hotspots_three_days` layer | Dataset-specific [DEA Hotspots](https://data.gov.au/data/api/3/action/package_show?id=digital-earth-australia-hotspots) and [WFS](https://data.gov.au/data/api/3/action/package_show?id=digital-earth-australia-hotspots-wfs) catalogue licences are `notspecified`; fallback is [Geoscience Australia's current general copyright terms](https://www.ga.gov.au/copyright): Creative Commons Attribution 4.0 International, subject to specific statements, third-party rights and accompanying notices | `© Commonwealth of Australia (Geoscience Australia) 2026. This material is licensed under the Creative Commons Attribution 4.0 International Licence. Observe and retain any copyright or related notices that may accompany this material as part of the attribution.` | Point | Implemented five-minute viewport cache over the fixed three-day observation layer; last-good limited to fifteen minutes; satellite observation context only, not warning or evacuation advice; not assigned to a visible category pack until Task 6 |
 | `vic-parks` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:parkres` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Implemented daily viewport cache; reference reserve boundaries with name/type/manager only; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
 | `vic-recreation-tracks` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:recweb_tracks` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Line or multiline | Implemented daily viewport cache; reference alignment only, explicitly not live closure or condition state; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
 | `vic-heritage` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:heritage_register` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Implemented daily viewport cache with unknown publisher cadence; bounded topology-checked simplification; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
@@ -103,9 +103,16 @@ source-specific public `propertyName` allow-list. Redirects and non-JSON media
 types fail closed. Response bodies are stream-limited to 2 MB while the shared
 provider-wide semaphore is held; normalization then enforces the source feature
 cap, finite longitude/latitude, exact geometry nesting, 50,000 input coordinates
-per feature and 100,000 per response. Malformed or excessive geometry rejects
-the refresh instead of being cached. Duplicate or wrong-geometry rows are
-removed deterministically and make source status partial rather than current.
+per feature and 100,000 per response. Polygon holes must lie strictly inside
+their shell without touching or crossing it; holes may not overlap, touch or
+nest; and sibling multipolygon members may not overlap, touch or contain one
+another. Relationship and ring checks share a 100,000-comparison budget per
+normalization, with only linear bounds storage; exhausting it rejects the
+refresh. Ring direction is not an admission requirement because official
+GeoJSON is inconsistent, but simplification must preserve each ring's original
+orientation. Malformed, contradictory-count or excessive geometry rejects the
+refresh instead of being cached. Duplicate or wrong-geometry rows are removed
+deterministically and make source status partial rather than current.
 
 DEA output retains observation time and provider-supplied positional uncertainty
 and confidence, but no provider ID, file name or operational free text. Its
@@ -116,8 +123,9 @@ never expose closure, condition, comments or maintenance fields. Heritage keeps
 only site name and heritage-object type, labels publisher cadence unknown, and
 never exposes register/internal IDs or sensitive/free-text fields. Heritage
 polygon input is validated before deterministic reduction to at most 4,000
-coordinates per feature; closed rings, winding order and simple-ring topology
-are revalidated after simplification. A failed refresh uses source-local
+coordinates per feature; closed rings, original orientation, simple-ring and
+full polygon/multipolygon relationships are revalidated after simplification.
+A failed refresh uses source-local
 last-good data only inside the catalogue ceiling, otherwise returns a sanitized
 timeout/unavailable/invalid response.
 
