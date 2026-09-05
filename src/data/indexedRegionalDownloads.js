@@ -99,13 +99,12 @@ function headerValue(response, name, maxLength = 1_024) {
 
 async function readStreamCapped(response, { maxBytes, maxCompressedBytes }) {
   const declaredHeader = response.headers?.get?.('content-length');
-  const declaredLength = typeof declaredHeader === 'string' && declaredHeader.trim()
+  const parsedDeclaredLength = typeof declaredHeader === 'string' && declaredHeader.trim()
     ? Number(declaredHeader)
+    : Number.NaN;
+  const declaredLength = Number.isFinite(parsedDeclaredLength) && parsedDeclaredLength >= 0
+    ? parsedDeclaredLength
     : null;
-  if (declaredLength !== null && (!Number.isFinite(declaredLength) || declaredLength < 0)) {
-    await cancelResponseBody(response);
-    throw codedError('invalid source data', 'INVALID_SOURCE_DATA');
-  }
   if (declaredLength !== null && declaredLength > maxCompressedBytes) {
     await cancelResponseBody(response);
     throw codedError('source limit exceeded', 'SOURCE_LIMIT');
@@ -364,9 +363,10 @@ function validateResource(config, metadata) {
   const hasUpdateTerm = /\bupdat(?:e|es|ed|ing)\b|update your copy/i.test(notes);
   const hasNonTransferTerm = /non-transferable/i.test(notes);
   const hasNoSublicenceTerm = /may not (?:be )?sublicen[cs](?:e|ed)|no sublicen[cs]ing/i.test(notes);
-  const termsConflict = hasUpdateTerm && hasNonTransferTerm && hasNoSublicenceTerm
-    ? `Structured catalogue licence says ${licence || 'unspecified'}, while package notes require prompt updates and describe the licence as non-transferable with no sublicensing; legal review is required before relying on redistribution rights.`
-    : `Structured catalogue licence says ${licence || 'unspecified'}, while package notes contain separate provider terms; legal review is required before relying on redistribution rights.`;
+  const termsConflict = !notes.trim() ? null
+    : hasUpdateTerm && hasNonTransferTerm && hasNoSublicenceTerm
+      ? `Structured catalogue licence says ${licence || 'unspecified'}, while package notes require prompt updates and describe the licence as non-transferable with no sublicensing; legal review is required before relying on redistribution rights.`
+      : `Structured catalogue licence says ${licence || 'unspecified'}, while current package notes contain additional terms that have not matched the reviewed clauses; legal review is required before relying on redistribution rights.`;
   return Object.freeze({
     id: resource.id,
     url: url.href,
@@ -379,7 +379,7 @@ function validateResource(config, metadata) {
     licence,
     ...(config === SOURCE_CONFIGS['au-public-toilets'] ? {
       legalReview: 'required',
-      termsConflict,
+      ...(termsConflict ? { termsConflict } : {}),
     } : {}),
   });
 }

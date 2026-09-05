@@ -313,6 +313,16 @@ test('missing Content-Length remains unknown rather than reporting zero compress
   assert.equal(result.sourceStatus.decodedBytes, 7);
 });
 
+test('malformed Content-Length remains unknown while decoded-byte limits still apply', async () => {
+  const index = genericIndex({
+    maxBytes: 4,
+    resolveResource: async () => ({ id: '11111111-1111-4111-8111-111111111111', url: 'https://downloads.example.test/v1.bin' }),
+    fetchImpl: async () => streamedResponse('12345', { headers: { 'Content-Length': 'unknown' }, chunkSize: 1 }),
+    parse: async () => ({ features: [], totalRows: 0, invalidRows: 0 }),
+  });
+  await assert.rejects(() => index.query(MELBOURNE), /source limit/i);
+});
+
 function ckanPayload(sourceId, overrides = {}) {
   const isToilet = sourceId === 'au-public-toilets';
   return {
@@ -456,6 +466,17 @@ test('toilet legal warning reflects rotated licence metadata without a hard-code
   assert.equal(result.sourceStatus.licence, 'Other provider licence');
   assert.match(result.sourceStatus.termsConflict, /Other provider licence/);
   assert.doesNotMatch(result.sourceStatus.termsConflict, /catalogue licence says CC BY 3\.0 AU/i);
+});
+
+test('empty rotated toilet notes do not invent separate provider terms', async () => {
+  const metadataOverride = ckanPayload('au-public-toilets');
+  metadataOverride.result.license_title = 'Other provider licence';
+  metadataOverride.result.notes = '';
+  const { client } = officialDownloads({ metadataOverride });
+  const result = await client.load('au-public-toilets', { bbox: MELBOURNE, maxFeatures: 10 });
+  assert.equal(result.sourceStatus.licence, 'Other provider licence');
+  assert.equal('termsConflict' in result.sourceStatus, false);
+  assert.equal(result.sourceStatus.legalReview, 'required');
 });
 
 test('official resolver rejects metadata/download media mismatches and redirects without following them', async (t) => {

@@ -79,3 +79,9 @@ cover and the implementation now enforces all six:
 - a missing Content-Length is exposed as unknown (`null`), not zero bytes.
 
 Focused post-fix verification passed 103/103 tests.
+
+The targeted re-review found two remaining metadata-edge cases. Empty rotated
+package notes now omit `termsConflict` rather than inventing separate terms,
+while `legalReview` remains explicit. A malformed Content-Length is now treated
+as unknown and the decoded stream limit still applies. Focused verification
+including both regressions passed 105/105.

@@ -284,3 +284,8 @@
   cancellation, exact-path, rotating-licence wording, body-timeout and unknown
   compressed-size defects. RED regressions reproduced all six; the fixes pass
   103/103 focused adapter/catalogue/proxy tests. No push or deployment occurred.
+- Task 5 targeted re-review found two final metadata edge cases: empty rotated
+  package notes could imply nonexistent separate terms, and malformed
+  Content-Length was rejected rather than reported unknown. Both now behave
+  honestly while decoded-byte limits remain enforced; focused verification
+  passed 105/105. No push or deployment occurred.
