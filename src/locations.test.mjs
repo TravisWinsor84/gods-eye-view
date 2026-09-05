@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import * as Cesium from 'cesium';
 import {
   CANCELLED_SEARCH,
+  CITY_POIS,
   placeFramingViewport,
   PLACE_VIEWPORT_MAX_SPAN_KM,
   PLACE_ANCHOR_OFFSET_RATIO,
@@ -20,6 +21,19 @@ import {
   GLOBE_VIEW,
   searchAndFlyTo,
 } from './locations.js';
+
+test('Melbourne preset has five POIs inside valid city bounds', () => {
+  const melbourne = CITY_POIS.melbourne;
+  assert.equal(melbourne.name, 'Melbourne');
+  assert.equal(melbourne.pois.length, 5);
+  const { southwest, northeast } = melbourne.viewBounds;
+  assert.ok(southwest.lat < northeast.lat);
+  assert.ok(southwest.lng < northeast.lng);
+  for (const poi of melbourne.pois) {
+    assert.ok(poi.lat >= southwest.lat && poi.lat <= northeast.lat, `${poi.name} latitude`);
+    assert.ok(poi.lon >= southwest.lng && poi.lon <= northeast.lng, `${poi.name} longitude`);
+  }
+});
 
 function stubViewer() {
   const flights = [];
@@ -57,7 +71,11 @@ async function runSearch(viewer, options, { result = AUSTIN_RESULT, query = 'aus
   const hadWindow = Object.hasOwn(globalThis, 'window');
   const priorWindow = globalThis.window;
   const priorFetch = globalThis.fetch;
-  globalThis.window = { __GOOGLE_MAPS_API_KEY__: 'test-key' };
+  globalThis.window = {
+    __GOOGLE_MAPS_API_KEY__: 'test-key',
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
+  };
   globalThis.fetch = async () => ({
     json: async () => ({ status: 'OK', results: [result] }),
   });
@@ -595,5 +613,47 @@ test('search without an authority hook preserves the existing caller contract', 
   const viewer = stubViewer();
   const result = await runSearch(viewer, {});
   assert.equal(result.navigationMode, 'city-overview');
+  assert.equal(result.latitude, 30.2672);
+  assert.equal(result.longitude, -97.7431);
   assert.equal(viewer.flights.length, 1);
+});
+
+test('natural-region swath search returns the resolved coordinates', async () => {
+  const viewer = stubViewer();
+  const naturalRegion = resultOf(
+    ['natural_feature'],
+    boxOf(20, -110, 40, -85),
+    30.2672,
+    -97.7431,
+    'Synthetic Mountain Range',
+  );
+
+  const result = await runSearch(viewer, {}, {
+    result: naturalRegion,
+    query: 'Synthetic Mountain Range',
+  });
+
+  assert.equal(result.navigationMode, 'natural-region-swath');
+  assert.equal(result.latitude, 30.2672);
+  assert.equal(result.longitude, -97.7431);
+});
+
+test('precise-place search returns the resolved coordinates', async () => {
+  const viewer = stubViewer();
+  const precisePlace = resultOf(
+    ['premise'],
+    boxAround(30.268, -97.742, 0.001, 0.001),
+    30.268,
+    -97.742,
+    'Synthetic Civic Building',
+  );
+
+  const result = await runSearch(viewer, {}, {
+    result: precisePlace,
+    query: 'Synthetic Civic Building',
+  });
+
+  assert.equal(result.navigationMode, 'precise-place');
+  assert.equal(result.latitude, 30.268);
+  assert.equal(result.longitude, -97.742);
 });

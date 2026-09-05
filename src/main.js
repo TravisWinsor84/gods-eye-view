@@ -15,6 +15,8 @@ import aisLiveVesselsLayer from './data/aisLiveVessels.js';
 import militaryInstallationsLayer from './data/militaryInstallations.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
 import localDataLayers from './data/localLayers.js';
+import regionalDataLayers from './data/regionalPacks.js';
+import regionalImageryLayers from './data/regionalImageryLayer.js';
 import { LAYER_STATE_REGISTRY } from './data/layerState.js';
 import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
@@ -34,6 +36,8 @@ import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { initKeySetup } from './keySetup.js';
 import { loadPhotorealisticTileset } from './mapStartup.js';
+
+const regionalContextLayers = Object.freeze([...regionalDataLayers, ...regionalImageryLayers]);
 
 initLogoGaze();
 
@@ -188,7 +192,7 @@ async function init() {
     await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', { silent: true });
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
-    const styleManager = new StyleManager(viewer, { mapStackController });
+    const styleManager = new StyleManager(viewer, { mapStackController, regionalLayers: regionalContextLayers });
     // The previous multi-canvas weather compositor remains disabled. Cockpit
     // clouds use a separate, capped low-resolution GPU pass that never attaches
     // Cesium fog or post-process stages and is fully stopped in map mode.
@@ -222,6 +226,12 @@ async function init() {
     dataManager.register(militaryAwarenessLayer);
     militaryAwarenessLayer.attachDataManager(dataManager);
     for (const layer of localDataLayers) {
+      dataManager.register(layer);
+    }
+    for (const layer of regionalDataLayers) {
+      dataManager.register(layer);
+    }
+    for (const layer of regionalImageryLayers) {
       dataManager.register(layer);
     }
     // Restoration starts only after the complete production registry is sealed.

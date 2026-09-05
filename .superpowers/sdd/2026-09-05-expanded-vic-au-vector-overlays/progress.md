@@ -1,0 +1,291 @@
+# SDD ledger — plan: /Users/travis/Projects/gods-eye-view-vic-au/.worktrees/vic-au-execution/docs/superpowers/plans/2026-09-05-expanded-vic-au-vector-overlays.md
+
+## Baseline
+
+- 2026-09-05: plan and specification committed at `5c06cce` on `exec/vic-au-data-catalogue`.
+- 2026-09-05: Regional Task 4 completed review-clean at `cf142b3`; final full suite 2,773 passed with 1 skip and build clean. This plan may now begin.
+
+## Pre-flight interface scan
+
+| Tasks | Shared files/interfaces | Finding and ruling |
+| --- | --- | --- |
+| 1 -> 2-5 | `REGIONAL_SOURCES`, proxy source admission | Task 1 must establish `regionalSourceAvailability()` once; later adapters consume it rather than adding credential checks ad hoc. |
+| 1 -> 6 | EPA and PTV pack membership | Registered sources remain absent from default packs until browser-safe configuration is true; status must remain server-authoritative. |
+| 2-5 -> 6 | normalized FeatureCollections and per-source status | Category packs compose existing fixed source IDs only; they do not fetch providers directly. |
+| 2/3/5 | provider-wide download/index caches | Cache once per source refresh window and bbox-filter after decode to prevent viewport amplification. |
+| 2/4 | ArcGIS/WFS viewport queries | Fixed allow-listed endpoints, field lists, pagination and caps; partial sublayer failure is reported without erasing successful cohorts. |
+| 1-6 -> 7 | credentials, source truth, attribution | Deployment waits for review-clean source, credential-safe smoke tests, and explicit push/deploy approval. |
+
+## Decisions
+
+- EPA Victoria is incorrectly advertised as credential-free against a non-API page and must be fail-closed before new source work.
+- The Transport Victoria subscription key is installed only in the Docker host's mode-600 `.env`; its value must never enter source, reports, logs, URLs or browser bundles.
+- The current Transport Victoria tram vehicle feed returned HTTP 500 during authenticated measurement; runtime must report that mode degraded/unavailable rather than relabel it as a client failure.
+
+## Task state
+
+- Task 1 brief generated; Regional Task 4 dependency is review-clean and the task is ready for dispatch.
+- Task 1 dispatched to implementer `Russell` (`01a06fdf-58e5-7a81-9246-d3f90f304991`) from base `b5859ef`.
+- Task 1 implementation committed as `06d6d5f`; affected layer tests 15/15, focused 43/43, full suite 2,775 passed with 1 skip, and build clean.
+- Task 1 independent review found zero runtime defects and two P2 documentation-contract defects: stale whole-catalogue inactive wording and a prematurely named EPA environment variable in the registered-operations follow-on plan. Fix round 1/5 corrects only those statements.
+- Task 1 re-review 1 confirmed the EPA contract fix but found one remaining P2: catalogue wording equated runtime eligibility with an implemented proxy/layer even though AIHW is eligible but not yet wired. Fix round 2/5 scopes integration status per entry.
+- Task 1 final re-review passed with zero actionable findings. Task 1 complete at `cea0304`; runtime verification remains 2,775 passed, 0 failed, 1 skipped, with build clean.
+- Task 2 preflight: live ArcGIS 11.1 metadata confirmed six emergency layers, three health layers, and one composite gazetteer layer in decimal degrees; exact field schemas captured for allow-list design.
+- Task 2 dispatched to implementer `Peirce` (`01a06ff2-bf73-73b3-bede-878c32d93951`) from base `3b718a1`.
+- Task 2 implementation committed as `fa88838`: fixed GA ArcGIS adapters and
+  proxy paths for six emergency, three health and one gazetteer sublayer;
+  strict field allow-lists, two-page/1 MiB/1,000-feature caps, sanitized
+  reference-only output, partial-layer status and exact GA/G-NAF attribution.
+- Task 2 focused verification passed 57/57; full suite passed 2,793 with 0
+  failures and 1 expected Node-version benchmark skip; production build passed
+  at 161 modules and `git diff --check` passed.
+- Task 2 live read-only smoke normalized 53 emergency and 529 health features
+  in the Melbourne bbox. The full gazetteer proxy returned 1,000 features with
+  honest partial/capped status in 33.766 seconds. Visible category-layer and
+  deployed-host proof remain Task 6/deployment gates. Independent review is
+  pending; no push or deployment occurred.
+- Task 1 TDD implementation is complete. The controller approved a bounded
+  correction to the two stale `src/data/regionalLayer.test.mjs` fixtures; they
+  now use `melbourne-trees` while preserving route, clustering, source-local
+  last-good and DataVic error assertions.
+- Final verification: affected regional-layer suite 15/15; focused Task 1 suite
+  43/43; full suite 2,775 passed, 0 failed, 1 expected Node-version benchmark
+  skip; production build clean at 160 modules; `git diff --check` clean.
+- EPA registration, product subscription and authenticated endpoint/schema/key
+  contract validation remain the only EPA activation gate. No push or deploy
+  occurred.
+- Task 2 independent review failed with two P1 and three P2 findings: retained
+  pages were dropped after a later failure, source-wide cap status could be
+  falsely fresh, empty transfer-limited pages stopped pagination, GA fan-out
+  bypassed the four-request ceiling, and mixed outages were mislabeled timeout.
+- Task 2 fix round 1/5 added RED-first regressions and corrected all five
+  findings. Prior-page features now survive later upstream failure with a
+  sanitized partial-layer error; cap-omitted layers are explicitly
+  capped/unprocessed; empty transfer-limited pages advance within the two-page
+  bound; a FIFO gate limits actual GA provider fetches to four and releases on
+  errors/aborts; only unanimous no-data timeouts return 504.
+- Fresh fix-round verification: focused GA/source/proxy/credit/layer suites
+  passed 80/80; the full suite passed 2,801 with 0 failures and 1 expected
+  Node-version allocation-benchmark skip; production build passed at 161
+  modules; `git diff --check` passed. Independent re-review remains pending;
+  no push or deployment occurred.
+- Task 2 re-review 1 confirmed four findings resolved but found one remaining
+  P2: a non-empty short transfer-limited ArcGIS page advanced by returned rows
+  rather than the server-owned requested record window, allowing overlap,
+  duplicate IDs and omitted second-window rows under a falsely current result.
+- Task 2 fix round 2/5 added a RED-first short-page regression. A 500-row
+  request initially observed offsets `[0, 2]`; after the one-line correction,
+  empty, short and full transfer-limited pages all advance by the prior
+  `resultRecordCount`, preserving the two-page cap and review-clean behavior.
+- Fresh round-two verification: focused GA/source/proxy/credit/layer suites
+  passed 81/81; the full suite passed 2,802 with 0 failures and 1 expected
+  Node-version allocation-benchmark skip; production build passed at 161
+  modules. Independent re-review remains pending; no push or deployment
+  occurred.
+- Task 2 re-review 2 confirmed the requested-window correction and all four
+  earlier findings remain resolved, but found one P2 at the final local page
+  boundary: a transfer-limited second page attempted to construct offset 1,000
+  and converted the application cap into a false upstream failure.
+- Task 2 fix round 3/5 added RED-first short and empty final-page regressions.
+  The short sequence initially retained rows without capped status, while the
+  empty sequence returned a false 502. The proxy now stops after consuming the
+  second permitted page, before constructing a third request; both sequences
+  use exactly offsets `[0, 500]`, retain available rows, and return honest HTTP
+  200 degraded `partial`/`capped` status without an upstream error.
+- Fresh round-three verification: focused GA/source/proxy/credit/layer suites
+  passed 83/83; the full suite passed 2,804 with 0 failures and 1 expected
+  Node-version allocation-benchmark skip; production build passed at 161
+  modules; `git diff --check` passed. Independent re-review remains pending;
+  no push or deployment occurred.
+- Task 2 final independent re-review passed with zero actionable findings and
+  reran the focused suite 83/83. Task 2 complete at `eff5aea`.
+- Task 3 preflight: all seven official Opendatasoft dataset IDs resolve. Live
+  counts include 6,324 parking sensors and 29,053 bays; arbitrary rows may be
+  old while the maximum observation timestamp is current, so freshness is
+  per-record and provider tables must be globally cached/indexed.
+- Task 3 dispatched to implementer `Pasteur` (`01a07026-07d9-7172-902f-a2910005b912`) from base `40065ea`.
+- Task 3 implementation committed as `47de628`: five fixed City of Melbourne
+  source adapters, two provider-wide parking exports cached for two minutes,
+  cached kerbside join/spatial index, strict public-field allow-lists, generated
+  IDs, per-record five-minute stale state, explicit last-good ceilings and the
+  actual City of Melbourne CC BY 4.0 data credit. No Task 6 pack membership was
+  added.
+- Live Melbourne-bbox smoke returned 245 fountains, 44 barbecues, 1,000 capped
+  parking points, 1,000 capped development points and 319 culture points. The
+  parking refresh used exactly two exports, read 6,324 sensors and 5,072 bays
+  with join keys, preserved maximum observation `2026-09-05T06:07:49+00:00`,
+  and marked 994/1,000 sampled points stale independently.
+- Fresh Task 3 verification: focused suites 74/74; full suite 2,822 passed, 0
+  failed, 1 expected Node-version allocation-benchmark skip; production build
+  passed at 162 modules; `git diff --check` passed. Independent review remains
+  pending; no push or deployment occurred.
+- Task 3 independent review failed with three P1, four P2 and one P3 finding:
+  indefinitely renewable inherited parking tables, first-match duplicate-bay
+  joins, false fresh all-stale parking status, civic request fan-out bypassing
+  the provider-request ceiling, address-bearing fields, absent JSON media-type
+  enforcement, unordered offset pagination and stale weekly cadence text.
+- Task 3 fix round 1/5 added RED-first regressions and resolved all eight
+  findings. Parking table success ages are immutable and expire at ten minutes;
+  duplicate joins select nearest sensor geometry then recency/stable tie;
+  current/stale counts drive honest aggregate status; one FIFO gate limits
+  actual GA, civic and existing regional fetch/read operations to four without
+  changing PTV; address-bearing fields are removed; JSON media types are
+  enforced; fixed live-validated ordering plus defensive deduplication makes
+  pagination honest; and fountains/barbecues now use Daily cadence with a
+  three-missed-cycle 72-hour last-good ceiling.
+- Fresh fix-round live smoke returned 245 fountains, 44 barbecues, 991
+  development points after the subsequently identified public-spatial-identity
+  collapse, 319 culture points and 1,000 capped parking points (997 stale, 3
+  current). Focused Task 3/shared GA/PTV concurrency suites passed
+  110/110; full suite passed 2,832 with 0 failures and 1 expected Node-version
+  allocation-benchmark skip; production build passed at 162 modules;
+  `git diff --check` passed. Independent re-review remains pending; no push or
+  deployment occurred.
+- Task 3 re-review found four remaining issues: public feature identity was also
+  being used as source-row identity and collapsed distinct same-site
+  developments; PTV bypassed the shared four-request provider semaphore;
+  memorial offset ordering was not total; and the report retained obsolete
+  privacy/cadence wording.
+- Task 3 fix round 2/5 is implemented at `a992614`. Opaque `assetid`,
+  `development_key` and `asset_id` values are now selected only as internal
+  source-row identities, true overlapping rows deduplicate by that identity,
+  public IDs use bounded one-way digests with collision handling, and no
+  provider key is emitted. Memorials now use a provider-wide JSON export capped
+  at 2 MiB/2,000 rows, cached six hours, deterministically indexed and filtered
+  by bbox. PTV fetch and full body consumption now run inside the same
+  process-wide four-request semaphore as GA/civic/legacy paths, with release on
+  every settlement path.
+- RED-first regressions failed on all three runtime defects before the fixes.
+  Fresh focused Task 3/shared GA/PTV concurrency suites passed 114/114; full
+  `npm test` passed 2,836 with 0 failures and 1 expected Node-version skip;
+  production build passed at 162 modules; `git diff --check` passed. A live safe
+  smoke returned 1,000 capped development rows with zero duplicate source keys,
+  319 current culture rows, and both distinct `Painted Poles` records with
+  distinct generated IDs. No push or deployment occurred; independent
+  re-review remains pending.
+- Task 3 re-review 2 confirmed the PTV semaphore, memorial completeness and all
+  original runtime fixes, but found an enumerable provider-key transform in
+  public feature IDs and a stale memorial-pagination statement in the report.
+- Task 3 fix round 3/5 adds RED-first regressions for a 10,000-candidate opaque
+  key enumeration, stable identical-public-record ordinals, same-site survival
+  and true-source-row deduplication. Public ID bases now digest only normalized
+  returned properties, point coordinates and fixed source/dataset names;
+  provider keys remain internal to deduplication and collision-group ordering
+  and are never emitted or hashed. The report now states the one current
+  memorial export contract. Focused tests passed 116/116; full `npm test`
+  passed 2,838 with 0 failures and 1 expected Node-version skip; production
+  build passed at 162 modules; `git diff --check` passed.
+- Task 3 re-review 3 confirmed the civic projection/ordinal implementation but
+  found the separate parking ID still hashed enumerable `kerbsideid`, plus two
+  report statements overstating the observed artwork request count.
+- Task 3 fix round 4/5 adds RED-first parking regressions over 20,000 candidate
+  keys and identical-public-projection collisions. Parking ID bases now digest
+  only normalized public properties, coordinates and fixed source metadata;
+  `kerbsideid` remains internal to joining, deduplication and stable ordinal
+  ordering. The report now records the observed culture request shape as two
+  artwork record pages plus one memorial export.
+- The old key-derived parking-ID mutation failed the two new regressions with
+  20,000 enumerable IDs and non-ordinal collision IDs; the restored focused
+  civic suite passed 29/29. Final focused verification passed 118/118, full
+  `npm test` passed 2,840 with 0 failures and 1 expected Node-version skip, and
+  the production build passed at 162 modules; `git diff --check` passed.
+- Task 3 re-review 4 confirmed parking key privacy, duplicate-bay selection and
+  civic projection IDs, but found one P2: capped membership/order and
+  conflicting duplicate-sensor selection still depended on provider row order.
+- Task 3 fix round 5/5 adds RED-first reversal regressions over 1,005 parking
+  rows and three conflicting duplicate-sensor tie levels. Duplicate sensors now
+  choose latest finite observation time, then latest finite row update, then
+  ascending canonical row serialization. Public projection groups sort by base
+  ID and internal identity before the 1,000-feature cap is applied; no provider
+  key enters a public ID. Focused civic passed 31/31, required six-suite passed
+  120/120, full `npm test` passed 2,842 with 0 failures and 1 expected
+  Node-version skip, and the production build passed at 162 modules.
+- Task 3 final targeted re-review 5 passed. The reviewer reran the focused
+  31-test civic suite and live/targeted reversal probes over the current 6,324
+  sensor snapshot, confirmed deterministic capped membership and duplicate
+  sensor resolution, and found no remaining provider-key exposure or product
+  regression. Task 3 is closed; no push or deployment occurred.
+- Task 4 implementation adds fixed DEA/DataVic WFS 2.0 adapters for DEA
+  three-day hotspots, Victorian parks, recreation tracks and heritage. Browser
+  input remains source ID plus bbox; fixed type/property allow-lists, EPSG:4326,
+  GeoJSON, count/maxFeatures, redirect/media checks, 2 MB streaming reads,
+  feature/coordinate/nesting/topology caps and the shared four-request provider
+  semaphore are enforced. Sanitizers retain only source-safe observation or
+  reference fields and explicit non-warning/non-closure/unknown-cadence caveats.
+- Task 4 RED-first regressions covered missing adapters/routes, live consecutive
+  duplicate park vertices, a bounded 65-polygon heritage feature, exact-cap WFS
+  count metadata, deterministic dedupe/order, invalid/excessive topology,
+  response media/stream caps, finite coordinates, source-local last-good expiry
+  and provider concurrency through body consumption. Focused verification
+  passed 74/74.
+- Task 4 live read-only proxy smoke returned HTTP 200 for all four sources. DEA
+  returned 839 sanitized points from 1,000 rows and honestly reported
+  partial/capped against 2,174 WFS matches with 161 duplicate public projections;
+  parks returned 21 current multipolygons; tracks returned 7 current
+  multilines; heritage returned 250 partial/capped multipolygons against 645 WFS
+  matches. No sensitive or free-text values were copied into evidence.
+- Task 4 full `npm test` passed 2,857 with 0 failures and 1 expected Node-version
+  allocation-benchmark skip; production build passed at 163 modules; `git diff
+  --check` passed. No pack membership, push or deployment occurred; independent
+  review remains the next gate.
+- Task 4 review fixes were driven RED-first for full Polygon/MultiPolygon
+  relationships, pre/post-heritage-simplification validation, a shared bounded
+  topology budget, contradictory WFS totals and the exact 2026 Geoscience
+  Australia fallback attribution. The proxy now classifies topology-budget
+  rejection as sanitized invalid provider data.
+- Fresh bounded Task 4 smoke returned 200 for DEA (839 points, partial/capped
+  against 2,173 matches), parks (21 current multipolygons) and tracks (7 current
+  multilines). Heritage failed closed with sanitized HTTP 502 because current
+  row 6 contains two sibling polygon members violating the required no-overlap,
+  no-touch and no-containment contract. No provider IDs or free text were
+  retained in evidence; no push or deployment occurred.
+- Task 4 review-fix verification passed: focused 82/82; full `npm test` 2,865
+  passed, 0 failed and 1 expected skip, plus two Node-24-calibrated allocation
+  microbenchmarks skipped under Node 26.8.1; production build passed with 163
+  modules transformed and the existing large-chunk advisory.
+- Task 4 operational follow-up adds bounded per-feature fail-closed recovery.
+  Feature-local invalid geometry/topology is omitted, counted in
+  `sourceStatus.invalidFeatures` and always forces `partial`; a nonempty matched
+  response with no valid survivor fails the layer. Byte, collection/count,
+  nesting, total-coordinate and shared topology-budget failures remain fatal,
+  including cumulative work across many omitted invalid rows.
+- Current heritage requires 110,230 topology comparisons after its invalid row
+  is omitted. The bounded response cap is 150,000, and unchanged heritage
+  geometry avoids a redundant second topology pass while actually simplified
+  geometry remains validated before and after simplification.
+- Fresh live heritage smoke returned HTTP 200/degraded with 249 validated
+  multipolygons, `partial`/capped against 645 matches, one invalid feature
+  omitted and zero invalid emitted geometries. The four-source smoke returned
+  HTTP 200 for DEA (839 partial/capped points), parks (21 current
+  multipolygons), tracks (7 current multilines) and heritage (249 partial
+  multipolygons).
+- Follow-up verification passed: focused 88/88; full `npm test` 2,871 passed,
+  0 failed and 1 expected platform skip, plus two Node-24-calibrated allocation
+  microbenchmarks skipped under Node 26.8.1; production build passed with 163
+  modules transformed and the existing large-chunk advisory. No push or
+  deployment occurred.
+- Task 4 targeted re-review passed all runtime, live-source, topology,
+  fail-closed and attribution checks. Its only P3 was stale prose saying the
+  topology budget was 100,000 comparisons; the implementation and exported
+  contract use 150,000. Documentation now matches the runtime. Task 4 is
+  closed; no push or deployment occurred.
+- Task 5 indexed-download implementation is complete locally. National toilets
+  and Victorian transport stops resolve current official CKAN resources,
+  enforce streamed byte/row/schema limits, build provider-wide spatial indexes,
+  and reuse them across bboxes and conditional 304 revalidation. Focused
+  verification passed 95/95.
+- Live Task 5 smoke indexed 25,560 of 25,563 toilet rows from 12,057,577 bytes
+  and 31,161 of 31,170 transport-stop rows from 8,189,610 bytes. Both viewport
+  queries returned 1,000 deterministic features as partial/capped, and both
+  providers subsequently returned not-modified revalidation semantics. The
+  toilet catalogue/package licence conflict remains explicit and requires
+  legal review. No push or deployment occurred.
+- Task 5 independent review found clock-rollback freshness, rejected-stream
+  cancellation, exact-path, rotating-licence wording, body-timeout and unknown
+  compressed-size defects. RED regressions reproduced all six; the fixes pass
+  103/103 focused adapter/catalogue/proxy tests. No push or deployment occurred.
+- Task 5 targeted re-review found two final metadata edge cases: empty rotated
+  package notes could imply nonexistent separate terms, and malformed
+  Content-Length was rejected rather than reported unknown. Both now behave
+  honestly while decoded-byte limits remain enforced; focused verification
+  passed 105/105. No push or deployment occurred.

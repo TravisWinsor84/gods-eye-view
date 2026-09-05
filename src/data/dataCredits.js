@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { GA_SOURCE_CREDITS } from './gaRegionalSources.js';
 
 /**
  * Per-layer data attribution registered into Cesium's credit display.
@@ -144,6 +145,32 @@ export const DATA_CREDITS = [
       'Terrain (keyless globe stacks): ' +
       '<a href="https://terrain.reearth.land" target="_blank" rel="noopener">Re:Earth Terrain</a> / ' +
       'Mapterhorn (CC BY 4.0) / EGM2008 (NGA)',
+  },
+  {
+    key: 'ptv-transit',
+    html: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.',
+  },
+  {
+    key: 'vic-property-boundaries',
+    html: 'State of Victoria (DataVic), Vicmap Property — licensed under Creative Commons Attribution 4.0 International.',
+  },
+  {
+    key: 'au-emergency-facilities',
+    html: GA_SOURCE_CREDITS['au-emergency-facilities'],
+  },
+  {
+    key: 'au-health-facilities',
+    html: GA_SOURCE_CREDITS['au-health-facilities'],
+  },
+  {
+    key: 'au-place-names',
+    html: GA_SOURCE_CREDITS['au-place-names'],
+  },
+  {
+    key: 'city-of-melbourne-open-data',
+    html:
+      '<a href="https://data.melbourne.vic.gov.au/" target="_blank" rel="noopener">City of Melbourne Open Data</a> — licensed under ' +
+      '<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">Creative Commons Attribution 4.0 International</a>.',
   },
   // ── Bundled snapshots ───────────────────────────────────────────
   {

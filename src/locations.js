@@ -117,6 +117,18 @@ export const CITY_POIS = {
       { name: 'Jefferson Memorial', lat: 38.8814, lon: -77.0365, alt: 400, pitch: -30, heading: 0, buildingHeight: 25 },
     ],
   },
+  melbourne: {
+    name: 'Melbourne',
+    groundElevation: 15,
+    viewBounds: { southwest: { lat: -38.0, lng: 144.75 }, northeast: { lat: -37.65, lng: 145.15 } },
+    pois: [
+      { name: 'Federation Square', lat: -37.8179, lon: 144.9691, alt: 500, pitch: -28, heading: 225, buildingHeight: 25 },
+      { name: 'Flinders Street Station', lat: -37.8183, lon: 144.9671, alt: 520, pitch: -24, heading: 135, buildingHeight: 35 },
+      { name: 'Royal Exhibition Building', lat: -37.8047, lon: 144.9717, alt: 550, pitch: -28, heading: 180, buildingHeight: 35 },
+      { name: 'Shrine of Remembrance', lat: -37.8305, lon: 144.9734, alt: 600, pitch: -30, heading: 0, buildingHeight: 30 },
+      { name: 'Melbourne Cricket Ground', lat: -37.82, lon: 144.9834, alt: 950, pitch: -35, heading: 270, buildingHeight: 50 },
+    ],
+  },
 };
 
 /**
@@ -412,6 +424,8 @@ export async function searchAndFlyTo(viewer, query, options = {}) {
       });
       return {
         label,
+        latitude: lat,
+        longitude: lng,
         navigationMode: 'natural-region-swath',
         rangeM: swath.rangeM,
       };
@@ -445,6 +459,8 @@ export async function searchAndFlyTo(viewer, query, options = {}) {
     if (flight) {
       return {
         label,
+        latitude: lat,
+        longitude: lng,
         navigationMode,
         rangeM: null,
       };
@@ -470,6 +486,8 @@ export async function searchAndFlyTo(viewer, query, options = {}) {
   });
   return {
     label,
+    latitude: lat,
+    longitude: lng,
     navigationMode: requestedRange
       ? 'explicit-range'
       : (options.forceClose ? navigationMode.replace('-overview', '-close') : navigationMode),
