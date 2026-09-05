@@ -236,6 +236,11 @@ test('uses one clustered CustomDataSource and only the regional proxy route', as
   assert.ok(added[0] instanceof Cesium.CustomDataSource);
   assert.equal(added[0].clustering.enabled, false);
   assert.equal(added[0].entities.values.length, 1);
+  const marker = added[0].entities.values[0];
+  const at = Cesium.JulianDate.now();
+  assert.equal(marker.point.pixelSize.getValue(at), 13);
+  assert.equal(marker.label.disableDepthTestDistance.getValue(at), Number.POSITIVE_INFINITY);
+  assert.equal(marker.label.showBackground.getValue(at), true);
   assert.equal(urls.length, 1);
   assert.match(urls[0], /^\/api\/regional\/melbourne-trees\?/);
   assert.doesNotMatch(urls[0], /^https?:/);

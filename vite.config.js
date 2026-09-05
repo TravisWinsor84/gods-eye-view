@@ -7092,13 +7092,14 @@ async function fetchRegionalJson(url, {
   headers = {},
   timeoutMs = 9000,
   maxBytes = REGIONAL_MAX_RESPONSE_BYTES,
+  redirect = 'follow',
 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal, headers });
+    const response = await fetch(url, { signal: controller.signal, headers, redirect });
     if (!response.ok) throw new Error(`Upstream returned ${response.status}`);
-    return readResponseJsonCapped(response, maxBytes);
+    return await readResponseJsonCapped(response, maxBytes);
   } finally {
     clearTimeout(timeout);
   }
@@ -7159,7 +7160,7 @@ function normalizeRssArticles(xml, limit = 5) {
   return articles;
 }
 
-function fetchRegionalPlace(point, { zoom = 10, preferSuburb = false } = {}) {
+function fetchRegionalPlace(point, { zoom = 10, preferSuburb = false, rawDetail = false } = {}) {
   if (_nominatimPending >= 8) return Promise.reject(new Error('Place lookup queue is full'));
   _nominatimPending += 1;
   const task = _nominatimQueue.then(async () => {
@@ -7174,12 +7175,19 @@ function fetchRegionalPlace(point, { zoom = 10, preferSuburb = false } = {}) {
       addressdetails: '1',
       'accept-language': 'en',
     });
+    if (rawDetail) {
+      params.set('namedetails', '1');
+      params.set('extratags', '1');
+    }
     const payload = await fetchRegionalJson(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+      maxBytes: 256 * 1024,
+      redirect: 'error',
       headers: {
         'User-Agent': 'GodsEyeView/0.1 (+https://github.com/bilawalsidhu/gods-eye-view)',
         Referer: 'https://github.com/bilawalsidhu/gods-eye-view',
       },
     });
+    if (rawDetail) return payload;
     if (preferSuburb && payload?.address) {
       const suburb = payload.address.suburb || payload.address.neighbourhood || payload.address.quarter;
       if (suburb) return normalizeRegionalPlace({ ...payload, address: { ...payload.address, city: suburb } });
@@ -7188,6 +7196,104 @@ function fetchRegionalPlace(point, { zoom = 10, preferSuburb = false } = {}) {
   });
   _nominatimQueue = task.catch(() => null).finally(() => { _nominatimPending -= 1; });
   return task;
+}
+
+// Reverse lookup identifies a nearby mapped object, never the clicked footprint.
+export function normalizeMapFeature(payload, coordinates) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.error) {
+    throw new Error('Invalid map feature response');
+  }
+  const text = (value) => typeof value === 'string' || typeof value === 'number'
+    ? String(value).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 240) : '';
+  const link = (value) => {
+    if (typeof value !== 'string' || value.length > 2048) return '';
+    try {
+      const url = new URL(value);
+      return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : '';
+    } catch { return ''; }
+  };
+  const tags = payload.extratags || {};
+  const a = payload.address || {};
+  const category = text(payload.category || payload.class);
+  const type = text(payload.type);
+  // Only public POI classes may supply names or websites. Residential names,
+  // owner/operator/contact fields and free-form descriptions are never returned.
+  const publicPoi = ['amenity', 'shop', 'tourism', 'historic', 'leisure', 'office', 'railway', 'aeroway'].includes(category);
+  const name = publicPoi ? text(payload.namedetails?.['name:en'] || payload.name || payload.namedetails?.name) : '';
+  const street = [text(a.house_number), text(a.road || a.pedestrian || a.footway)].filter(Boolean).join(' ');
+  const address = [street, text(a.suburb || a.neighbourhood), text(a.city || a.town || a.village),
+    text(a.state), text(a.postcode), text(a.country)].filter(Boolean).join(', ');
+  const details = [];
+  const add = (label, value) => { if (value) details.push({ label, value }); };
+  add('Nearest mapped address', address);
+  add('Mapped category', [category, type].filter(Boolean).join(' / '));
+  for (const [key, label] of [['building', 'Building type'], ['building:levels', 'Mapped levels'],
+    ['height', 'Mapped height'], ['building:material', 'Building material'], ['roof:shape', 'Roof shape'],
+    ['heritage', 'Heritage designation'], ['start_date', 'Mapped start date']]) {
+    add(label, text(tags[key]));
+  }
+  if (publicPoi) add('Mapped website', link(tags.website));
+  add('Mapped source URL', link(tags.source));
+  const osmType = ['node', 'way', 'relation'].includes(payload.osm_type) ? payload.osm_type : '';
+  const osmId = typeof payload.osm_id === 'string' ? payload.osm_id
+    : Number.isSafeInteger(payload.osm_id) ? String(payload.osm_id) : '';
+  const sourceUrl = osmType && /^[1-9]\d{0,19}$/.test(osmId)
+    ? `https://www.openstreetmap.org/${osmType}/${osmId}` : 'https://nominatim.openstreetmap.org/';
+  return { coordinates, name: name || 'Nearby mapped feature', address, category: type || category || 'unknown', details,
+    source: 'OpenStreetMap via Nominatim', sourceUrl,
+    caveat: 'Nearest mapped feature; this may be beside the clicked building. Building identity is not verified.' };
+}
+
+export function mapFeatureProxy({
+  fetchDetail = (point) => fetchRegionalPlace(point, { zoom: 18, rawDetail: true }),
+  now = Date.now,
+} = {}) {
+  const cache = new Map();
+  const inFlight = new Map();
+  const allowed = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 40 });
+  const install = (middlewares) => middlewares.use('/api/map-feature', async (req, res) => {
+    const send = (status, body) => {
+      res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store',
+        ...(status === 429 || status === 503 ? { 'Retry-After': '30' } : {}) });
+      res.end(JSON.stringify(body));
+    };
+    if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
+    let url;
+    try { url = new URL(req.url || '', 'http://localhost'); } catch { return send(400, { error: 'Invalid request' }); }
+    if (url.pathname !== '/') return send(404, { error: 'Not Found' });
+    const params = url.searchParams;
+    const keys = [...params.keys()];
+    const decimal = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
+    const point = keys.length === 2 && ['latitude', 'longitude'].every((key) =>
+      params.getAll(key).length === 1 && decimal.test(params.get(key))) ? validRegionalPoint(params) : null;
+    if (!point) return send(400, { error: 'Valid latitude and longitude are required' });
+    if (!allowed(clientKey(req))) return send(429, { error: 'Rate limit exceeded' });
+    const key = `${point.latitude.toFixed(5)},${point.longitude.toFixed(5)}`;
+    const cached = cache.get(key);
+    // Echo the actual click even when nearby requests share upstream precision.
+    const respond = (entry) => send(entry.status, entry.status === 200 ? { ...entry.body, coordinates: point } : entry.body);
+    if (cached && now() < cached.expires) return respond(cached);
+    if (!inFlight.has(key) && inFlight.size >= 8) return send(503, { error: 'Map feature lookup busy' });
+    if (!inFlight.has(key)) {
+      const request = Promise.resolve().then(() => fetchDetail(point)).then((payload) => ({
+        status: 200, body: normalizeMapFeature(payload, point), expires: now() + REGIONAL_BRIEF_CACHE_MS,
+      })).catch(() => ({
+        status: 503, body: { error: 'Map feature temporarily unavailable' }, expires: now() + 30_000,
+      })).then((entry) => {
+        cache.delete(key);
+        cache.set(key, entry);
+        if (cache.size > 64) cache.delete(cache.keys().next().value);
+        return entry;
+      }).finally(() => inFlight.delete(key));
+      inFlight.set(key, request);
+    }
+    return respond(await inFlight.get(key));
+  });
+  return {
+    name: 'map-feature-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
 }
 
 /** Small automatic map-place route; shares the paced Nominatim queue only. */
@@ -7835,6 +7941,7 @@ export default defineConfig(({ mode }) => {
       regionalImageryProxy(),
       regionalBriefProxy(),
       regionalPlaceProxy(),
+      mapFeatureProxy(),
       weatherEffectsProxy(),
       cctvProxy(),
       radioBrowserProxy(),
