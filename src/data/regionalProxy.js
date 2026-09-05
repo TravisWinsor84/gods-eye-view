@@ -7,7 +7,7 @@ import { OGC_MAX_RESPONSE_BYTES, normalizeOgcPayload, ogcFeatureRequest } from '
 import { createIndexedRegionalDownloads, INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS } from './indexedRegionalDownloads.js';
 import { createDataVicWasteFacilities } from './dataVicWasteFacilities.js';
 import { normalizeVicmapParcelPayload, vicmapParcelRequest } from './vicmapPropertyBoundaries.js';
-import { createVicWetlands2025Server } from './vicWetlands2025Server.js';
+import { createVicWetlands2025Server } from '../../server/vicWetlands2025Server.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;

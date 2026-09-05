@@ -1,6 +1,6 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { queryVicWetlands2025Index } from './vicWetlands2025Index.js';
+import { queryVicWetlands2025Index } from '../src/data/vicWetlands2025Index.js';
 
 const MAX_INDEX_BYTES = 2 * 1024 * 1024;
 const MAX_CELL_BYTES = 16 * 1024 * 1024;

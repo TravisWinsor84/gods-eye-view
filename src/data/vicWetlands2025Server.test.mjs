@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { createVicWetlands2025Server } from './vicWetlands2025Server.js';
+import { createVicWetlands2025Server } from '../../server/vicWetlands2025Server.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const FIXTURE_ROOT = path.join(ROOT, 'src/data/fixtures/vic-wetlands-2025');
