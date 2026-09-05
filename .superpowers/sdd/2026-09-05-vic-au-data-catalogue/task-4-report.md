@@ -82,9 +82,11 @@ dependency before commit.
 
 ## Authenticated provider measurement
 
-At 2026-09-05 local time, direct requests using the user's assigned subscription
-key in the `KeyID` header produced the following credential-safe measurements.
-The key itself was not requested, read, printed, logged, stored or committed.
+At 2026-09-05 local time, the user's automatically assigned subscription key was
+copied from the authenticated portal and used in memory in the `KeyID` header for
+the following credential-safe measurements. The value was never printed, logged
+or committed. It was installed as `TRANSPORT_VIC_OPEN_DATA_API_KEY` in the
+Docker host's existing mode-600 deployment environment file.
 
 | Mode | HTTP | Bytes | MIME type | Interpretation |
 | --- | ---: | ---: | --- | --- |
