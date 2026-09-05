@@ -200,3 +200,8 @@
   key enters a public ID. Focused civic passed 31/31, required six-suite passed
   120/120, full `npm test` passed 2,842 with 0 failures and 1 expected
   Node-version skip, and the production build passed at 162 modules.
+- Task 3 final targeted re-review 5 passed. The reviewer reran the focused
+  31-test civic suite and live/targeted reversal probes over the current 6,324
+  sensor snapshot, confirmed deterministic capped membership and duplicate
+  sensor resolution, and found no remaining provider-key exposure or product
+  regression. Task 3 is closed; no push or deployment occurred.
