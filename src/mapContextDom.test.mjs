@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildMapContextFromUiState, collectRegionalSourceEntries, renderMapContext } from './mapContextDom.js';
+import { buildMapContextFromUiState, collectRegionalSourceEntries, renderMapContext, createMapFeatureInspectorPanel } from './mapContextDom.js';
 
 function makeElement(tagName = 'div') {
   const element = {
@@ -56,6 +56,29 @@ function makeRoot() {
   root.elements = elements;
   return root;
 }
+
+test('feature panel renders remote text safely, clears fields and unsafe links on close', () => {
+  const root = makeRoot();
+  let closed = false;
+  const panel = createMapFeatureInspectorPanel(root, () => { closed = true; panel.render(null); });
+  panel.render({ label: '<img src=x onerror=alert(1)>', kind: 'surface', status: 'ready',
+    fields: [{ label: '<b>Address</b>', value: '<script>test</script>' }],
+    sourceUrl: 'javascript:alert(1)', point: { latitude: -37, longitude: 145 } });
+  const [section] = root.children;
+  const [title, close, status, list, link] = section.children;
+  assert.equal(section.hidden, false);
+  assert.equal(title.textContent, '<img src=x onerror=alert(1)>');
+  assert.equal(list.children[3].textContent, '<script>test</script>');
+  assert.equal(link.hidden, true);
+  assert.match(status.textContent, /may not be the clicked building/);
+  panel.render({ label: 'Tree', kind: 'regional', status: 'ready', fields: [], sourceUrl: 'https://www.openstreetmap.org/way/1' });
+  assert.equal(link.getAttribute('href'), 'https://www.openstreetmap.org/way/1');
+  close.click();
+  assert.equal(closed, true); assert.equal(section.hidden, true);
+  assert.equal(title.textContent, ''); assert.equal(list.children.length, 0);
+  assert.equal(link.getAttribute('href'), null);
+  panel.dispose();
+});
 
 const resolvedContext = {
   title: 'Melbourne CBD',

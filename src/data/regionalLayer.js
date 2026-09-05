@@ -166,29 +166,33 @@ function addGeometryEntity(dataSource, {
   if (geometry?.type === 'Point') {
     entity.position = Cesium.Cartesian3.fromDegrees(coordinates[0], coordinates[1], Number(coordinates[2]) || 0);
     entity.point = {
-      pixelSize: 8,
+      pixelSize: 13,
       color: baseColor,
-      outlineColor: Cesium.Color.BLACK.withAlpha(0.7),
-      outlineWidth: 1,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 3,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     };
     if (label) {
       entity.label = {
         text: entity.name,
-        font: '12px sans-serif',
+        font: '600 13px sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
         outlineWidth: 3,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        pixelOffset: new Cesium.Cartesian2(0, -14),
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 120_000),
+        showBackground: true,
+        backgroundColor: Cesium.Color.BLACK.withAlpha(0.82),
+        backgroundPadding: new Cesium.Cartesian2(7, 5),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        pixelOffset: new Cesium.Cartesian2(0, -23),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 8_000),
       };
     }
   } else if (geometry?.type === 'LineString') {
     entity.polyline = {
       positions: Cesium.Cartesian3.fromDegreesArray(coordinates.flatMap((coordinate) => coordinate.slice(0, 2))),
-      width: 2,
-      material: baseColor,
+      width: 5,
+      material: new Cesium.PolylineOutlineMaterialProperty({ color: baseColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 2 }),
       clampToGround: true,
     };
   } else if (geometry?.type === 'Polygon') {
@@ -196,9 +200,16 @@ function addGeometryEntity(dataSource, {
     if (!hierarchy) return false;
     entity.polygon = {
       hierarchy,
-      material: colorWithAlpha(baseColor, 0.22),
-      outline: true,
-      outlineColor: baseColor,
+      material: colorWithAlpha(baseColor, 0.36),
+      // Ground polygon outlines are unsupported; render a visible boundary
+      // with the same entity identity so the fill and outline select together.
+      outline: false,
+    };
+    entity.polyline = {
+      positions: Cesium.Cartesian3.fromDegreesArray(coordinates[0].flatMap((coordinate) => coordinate.slice(0, 2))),
+      width: 4,
+      material: new Cesium.PolylineOutlineMaterialProperty({ color: baseColor, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 }),
+      clampToGround: true,
     };
   } else {
     return false;

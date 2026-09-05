@@ -1,5 +1,6 @@
 import { regionalDistanceM } from './data/regionalBrief.js';
 import { REGIONAL_SOURCES } from './data/regionalSources.js';
+import { isPickedWorldPosition } from './data/scenePick.js';
 
 /** Fetch only the viewed place; automatic map navigation never needs weather/news. */
 export async function fetchMapContextPlace(latitude, longitude, { signal } = {}) {
@@ -23,10 +24,60 @@ export function readRegionalContextSelection(entity, time) {
   const source = REGIONAL_SOURCES[sourceId];
   return {
     sourceId,
+    identity: value(entity?.id) || entity,
     label: value(entity?.name) || 'Regional feature',
     type: value(entity?.properties?.type) || value(entity?.properties?.category) || 'regional feature',
     source: source.name,
+    publisher: source.publisher || source.source,
+    cadence: source.refresh,
+    provenance: source.credit || source.source,
+    licence: source.licence,
+    caveat: source.sensitivityReview,
+    sourceUrl: source.officialUrl || source.endpoint,
+    fields: readInspectorFields(entity?.properties, time, new Set(['regionalSourceId', 'regionalSourceName', 'regionalPublisher', 'regionalGeometryType', 'name', 'id'])),
   };
+}
+
+/** Bounded scalar values only; Cesium PropertyBag and plain records are supported. */
+export function readInspectorFields(properties, time, excluded = new Set()) {
+  if (!properties || typeof properties !== 'object') return [];
+  const keys = Array.isArray(properties.propertyNames) ? properties.propertyNames : Object.keys(properties);
+  const fields = [];
+  for (const key of keys.slice(0, 128)) {
+    if (typeof key !== 'string' || key.startsWith('_') || excluded.has(key)) continue;
+    try {
+      const property = properties[key];
+      const value = typeof property?.getValue === 'function' ? property.getValue(time) : property;
+      if (!['string', 'number', 'boolean'].includes(typeof value) || (typeof value === 'number' && !Number.isFinite(value))) continue;
+      const content = String(value).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 300);
+      if (!content) continue;
+      fields.push({ label: key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_:]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()).slice(0, 80), value: content });
+      if (fields.length === 24) break;
+    } catch { /* One unavailable property must not hide the remaining record. */ }
+  }
+  return fields;
+}
+
+/** Resolve the actual click pixel. A sky click never becomes a camera location. */
+export function readMapContextClick(viewer, Cesium, pixel, picked = null) {
+  if (!pixel || !Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) return null;
+  const scene = viewer?.scene;
+  const convert = (surface) => {
+    if (!isPickedWorldPosition(surface)) return null;
+    try {
+      const point = Cesium.Cartographic.fromCartesian(surface);
+      const result = { latitude: Cesium.Math.toDegrees(point.latitude), longitude: Cesium.Math.toDegrees(point.longitude) };
+      if (Number.isFinite(point.height)) result.height = point.height;
+      return validPoint(result) ? result : null;
+    } catch { return null; }
+  };
+  if (picked && scene?.pickPositionSupported) {
+    try { const point = convert(scene.pickPosition(pixel)); if (point) return point; } catch { /* Fall back to terrain. */ }
+  }
+  try {
+    const ray = viewer.camera.getPickRay(pixel);
+    return convert(ray && scene.globe?.pick(ray, scene)) || convert(viewer.camera.pickEllipsoid(pixel, scene.globe?.ellipsoid));
+  } catch { return null; }
 }
 
 /** Pick the viewed surface, not the camera's (potentially distant) nadir. */

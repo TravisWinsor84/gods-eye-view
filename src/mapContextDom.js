@@ -2,6 +2,71 @@ import { buildMapContext } from './mapContext.js';
 
 const renderState = new WeakMap();
 
+/** Independent selection panel; all remote strings enter the DOM as text. */
+export function createMapFeatureInspectorPanel(root, onClose) {
+  const doc = root?.ownerDocument;
+  if (!doc?.createElement) return { render() {}, dispose() {} };
+  const panel = doc.createElement('section');
+  panel.id = 'map-feature-inspector';
+  panel.className = 'map-feature-inspector';
+  panel.hidden = true;
+  panel.setAttribute('aria-label', 'Selected map feature');
+  const title = doc.createElement('h3');
+  title.className = 'map-feature-inspector-title';
+  const close = doc.createElement('button');
+  close.type = 'button';
+  close.setAttribute('data-map-feature-close', '');
+  close.setAttribute('aria-label', 'Close selected feature details');
+  close.textContent = 'Close';
+  const dismiss = () => { onClose(); };
+  close.addEventListener('click', dismiss);
+  const status = doc.createElement('p');
+  status.className = 'map-feature-inspector-status';
+  status.setAttribute('role', 'status');
+  const list = doc.createElement('dl');
+  list.className = 'map-feature-inspector-fields';
+  const link = doc.createElement('a');
+  link.className = 'map-feature-inspector-source';
+  panel.append(title, close, status, list, link);
+  root.append(panel);
+  const bounded = (value) => text(value).slice(0, 600);
+  return {
+    render(model) {
+      panel.hidden = !model;
+      title.textContent = bounded(model?.label);
+      status.textContent = !model ? '' : model.status === 'loading' ? 'Looking up nearby mapped details…'
+        : model.status === 'error' ? 'Place details unavailable. Click again to retry; the selected coordinates remain accurate.'
+          : model.kind === 'surface' && model.status !== 'coordinates'
+            ? 'Nearest mapped feature; may not be the clicked building.'
+            : model.status === 'coordinates' ? 'Selected surface coordinates. No building details requested.' : bounded(model.caveat);
+      const rows = [];
+      const add = (label, value) => { if (value === null || value === undefined || value === '') return;
+        const term = doc.createElement('dt'); term.textContent = bounded(label);
+        const definition = doc.createElement('dd'); definition.textContent = bounded(value);
+        rows.push(term, definition);
+      };
+      if (model?.point) add('Clicked coordinates', `${model.point.latitude.toFixed(6)}, ${model.point.longitude.toFixed(6)}`);
+      for (const row of (model?.fields || []).slice(0, 26)) add(row.label, row.value);
+      add('Source', model?.source);
+      add('Publisher', model?.publisher);
+      add('Update cadence', model?.cadence);
+      add('Provenance', model?.provenance);
+      add('Licence', model?.licence);
+      list.replaceChildren(...rows);
+      let href = null;
+      try { const url = new URL(model?.sourceUrl);
+        if (url.protocol === 'https:' && !url.username && !url.password) href = url.href;
+      } catch { /* No usable source link. */ }
+      link.hidden = !href;
+      link.textContent = href ? 'View source' : '';
+      if (href) { link.setAttribute('href', href); link.setAttribute('target', '_blank'); link.setAttribute('rel', 'noopener noreferrer'); }
+      else link.removeAttribute('href');
+      if (!model && panel.contains?.(doc.activeElement)) root.querySelector('[data-map-context-toggle]')?.focus();
+    },
+    dispose() { close.removeEventListener?.('click', dismiss); panel.remove?.(); },
+  };
+}
+
 function text(value, fallback = '') {
   return typeof value === 'string' || typeof value === 'number'
     ? String(value)
@@ -204,7 +269,7 @@ export function buildMapContextFromUiState({
     : [];
   const context = buildMapContext({
     location,
-    selection: regionalSelection ? { ...regionalSelection, source: null } : selection,
+    selection: regionalSelection ? { ...regionalSelection, source: null, publisher: null } : selection,
     camera: camera ?? (hasHeading ? { headingDegrees: heading } : null),
     enabledLayers: Array.isArray(enabledLayers) ? enabledLayers : [...enabledLayers],
     sources: [...sourceList, ...cameraSource],
@@ -213,7 +278,7 @@ export function buildMapContextFromUiState({
     ...context,
     ...(regionalSelection ? { explanation: `${context.explanation} · ${text(regionalSelection.source)}` } : {}),
     ...(hasHeading ? { heading } : {}),
-    selectionKey: regionalSelection ? `${regionalSelection.sourceId}:${regionalSelection.label}` : null,
+    selectionKey: regionalSelection ? (regionalSelection.identity || `${regionalSelection.sourceId}:${regionalSelection.label}`) : null,
   };
 }
 

@@ -14,7 +14,8 @@ import {
 } from './bloom.js';
 import { LOCATIONS, CITY_POIS, GLOBE_VIEW, flyToGlobeView, flyToPresetLocation, flyToPOI, searchAndFlyTo } from './locations.js';
 import { locationMiniStatus } from './locationStatus.js';
-import { buildMapContextFromUiState, collectRegionalSourceEntries, renderMapContext } from './mapContextDom.js';
+import { buildMapContextFromUiState, collectRegionalSourceEntries, renderMapContext, createMapFeatureInspectorPanel } from './mapContextDom.js';
+import { createMapFeatureInspector } from './mapFeatureInspector.js';
 import { createMapContextLocation, mapContextDestinationMatches, readMapContextCentre, readRegionalContextSelection } from './mapContextLocation.js';
 import { interruptCameraMotion } from './cameraVerbs.js';
 import {
@@ -9563,6 +9564,11 @@ export class StyleManager {
    * @returns {void}
    */
   _initMapContext() {
+    this._mapFeatureInspector?.dispose();
+    this._mapFeatureInspectorPanel?.dispose();
+    this._mapFeatureInspectorPanel = createMapFeatureInspectorPanel(this._mapContextCard, () => this._mapFeatureInspector?.clear());
+    this._mapFeatureInspector = createMapFeatureInspector({ viewer: this.viewer, Cesium,
+      onChange: (model) => this._mapFeatureInspectorPanel.render(model) });
     this._mapContextSelectionRemove?.();
     this._mapContextSelectionRemove = this.viewer?.selectedEntityChanged?.addEventListener(() => {
       this._updateMapContext();
@@ -9613,6 +9619,7 @@ export class StyleManager {
    * @returns {void}
    */
   _updateMapContext() {
+    this._mapFeatureInspector?.sync();
     if (!this._mapContextCard) return;
     const headingRadians = this.viewer?.camera?.heading;
     const cameraHeading = Number.isFinite(headingRadians)
@@ -10221,6 +10228,8 @@ export class StyleManager {
     this._globalStatusNotice = null;
     if (this._globalLoadingStatus) this._globalLoadingStatus.hidden = true;
     this._disposed = true;
+    this._mapFeatureInspector?.dispose();
+    this._mapFeatureInspectorPanel?.dispose();
     this._mapContextLocation?.dispose();
     this._mapContextSelectionRemove?.();
     this._mapContextSelectionRemove = null;
