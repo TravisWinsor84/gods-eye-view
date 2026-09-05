@@ -26,10 +26,10 @@ public file makes a useful live map overlay.
 
 | Source | State | What would unlock it |
 | --- | --- | --- |
-| Transport Victoria Planned Disruptions | Subscription required | Portal support enables the product for the existing account/key. |
-| Transport Victoria Freeway Travel Time | Subscription required | Portal support enables both Traffic and GIS APIs. |
+| Transport Victoria Planned Disruptions | Subscription requested | Portal support request submitted for the existing account/key. |
+| Transport Victoria Freeway Travel Time | Subscription requested | Portal support request submitted for both Traffic and GIS APIs. |
 | EPA Victoria current air quality | Registration/product contract unverified | Complete developer registration, then verify endpoint, header, quota, licence and live payload. |
-| Victorian Wetland Inventory 2025 | Free order in progress | DataShare emails the whole-state SHP link; record URL, bytes and SHA-256, preprocess, mount artifacts, set both configuration variables. |
+| Victorian Wetland Inventory 2025 | Artifact built and verified | Deploy the serving contract, mount the staged 444-cell artifact, and set both configuration variables. |
 | Victorian public webcams | No reusable image API found | Publisher grants an explicit machine endpoint plus public display/cache rights. |
 | Live Victorian hospital waits | No supported public live feed found | VAHI or a health publisher releases a machine feed with republication permission and non-clinical caveats. |
 | BOM operational imagery | Product licence required | Obtain the applicable Bureau display/redistribution licence. |

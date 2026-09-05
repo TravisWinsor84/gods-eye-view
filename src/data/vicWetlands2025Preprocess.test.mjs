@@ -67,6 +67,7 @@ test('converts a hash-pinned SHP ZIP through GDAL before applying the same bound
     fileName: path.basename(archive),
     bytes: archiveBytes.length,
     sha256: digest(archiveBytes),
+    shapefilePath: 'nested/export/WETLAND_CURRENT.shp',
   };
   const manifestPath = path.join(scratch, 'release-manifest.json');
   await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
@@ -74,7 +75,7 @@ test('converts a hash-pinned SHP ZIP through GDAL before applying the same bound
   const fakeGdal = path.join(scratch, 'ogr2ogr');
   await writeFile(fakeGdal, `#!/usr/bin/env node
 const fs = require('node:fs');
-const expected = ['-f', 'GeoJSONSeq', '/vsistdout/', '/vsizip/' + process.env.VIC_WETLANDS_TEST_ARCHIVE, 'WETLAND_CURRENT', '-t_srs', 'EPSG:4326', '-lco', 'RS=YES'];
+const expected = ['-f', 'GeoJSONSeq', '/vsistdout/', '/vsizip/' + process.env.VIC_WETLANDS_TEST_ARCHIVE + '/nested/export/WETLAND_CURRENT.shp', '-t_srs', 'EPSG:4326', '-lco', 'RS=YES'];
 if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.exit(64);
 const input = JSON.parse(fs.readFileSync(process.env.VIC_WETLANDS_TEST_FIXTURE, 'utf8'));
 for (const feature of input.features) process.stdout.write(String.fromCharCode(30) + JSON.stringify(feature) + '\\n');
@@ -114,6 +115,7 @@ test('downloads only the manifest-pinned DataShare archive and publishes it afte
     fileName: 'WETLANDCURRENT_SHP.zip',
     bytes: bytes.length,
     sha256: digest(bytes),
+    shapefilePath: 'nested/WETLAND_CURRENT.shp',
     downloadUrl: 'https://datashare.maps.vic.gov.au/downloads/pinned/WETLANDCURRENT_SHP.zip',
   };
   const requests = [];
@@ -231,6 +233,49 @@ test('keeps distinct features when the official wetland number is reused', async
   }
   assert.equal(ids.size, 2);
   assert.equal([...ids].every((id) => id.startsWith('vic-wetlands-2025:7')), true);
+});
+
+test('retains a valid tiny official polygon when simplification would collapse its ring', async (t) => {
+  const scratch = await mkdtemp(path.join(tmpdir(), 'vic-wetlands-2025-tiny-'));
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const fixture = JSON.parse(await readFile(path.join(FIXTURE_ROOT, 'source.geojson'), 'utf8'));
+  fixture.features = [structuredClone(fixture.features[0])];
+  fixture.features[0].properties.WTLND_TYPE = fixture.features[0].properties.WETLANDTYP;
+  fixture.features[0].properties.WAT_REGIME = fixture.features[0].properties.WTRREG;
+  fixture.features[0].properties.SRCDATANAM = fixture.features[0].properties.EX_DATASET;
+  fixture.features[0].properties.WATREGCONF = fixture.features[0].properties.WTRREG_CON;
+  delete fixture.features[0].properties.WETLANDTYP;
+  delete fixture.features[0].properties.WTRREG;
+  delete fixture.features[0].properties.EX_DATASET;
+  delete fixture.features[0].properties.WTRREG_CON;
+  fixture.features[0].geometry.coordinates = [[
+    [145, -37], [145.00001, -37], [145.00001, -36.99999],
+    [145, -36.99999], [145, -37],
+  ], [
+    [145.000004, -36.999996], [145.0000041, -36.999996],
+    [145.0000041, -36.9999959], [145.000004, -36.999996],
+  ]];
+  const source = path.join(scratch, 'tiny.geojson');
+  const sourceBytes = Buffer.from(`${JSON.stringify(fixture)}\n`);
+  await writeFile(source, sourceBytes);
+  const manifest = JSON.parse(await readFile(path.join(FIXTURE_ROOT, 'release-manifest.json'), 'utf8'));
+  manifest.sourceArchive = {
+    fileName: path.basename(source),
+    bytes: sourceBytes.length,
+    sha256: digest(sourceBytes),
+  };
+  const manifestPath = path.join(scratch, 'release-manifest.json');
+  await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+  const output = path.join(scratch, 'output');
+  const result = spawnSync(process.execPath, [
+    SCRIPT, '--release-manifest', manifestPath, '--source', source, '--out-dir', output,
+  ], { cwd: ROOT, encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  const index = JSON.parse(await readFile(path.join(output, 'index.json'), 'utf8'));
+  const cell = JSON.parse(await readFile(path.join(output, index.cells[0].path), 'utf8'));
+  assert.equal(cell.features[0].geometry.coordinates.length, 1);
+  assert.equal(cell.features[0].geometry.coordinates[0].length, 5);
 });
 
 test('fails closed on release identity, source hash, feature, and geometry limit drift', async (t) => {

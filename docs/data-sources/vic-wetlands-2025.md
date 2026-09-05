@@ -32,6 +32,25 @@ download formats (DWG, DXF, GDB, SHP, MIF, TAB and Extended TAB), not a WFS.
 The separately catalogued `WETLAND_CURRENT_NVR_MAP` WFS is explicitly a copy
 from before the 2025 update and must never back this source ID.
 
+## Production release evidence
+
+DataShare order `T7V5WN`, delivered 5 September 2026, was processed with these
+pinned values:
+
+- archive: `Order_DZDI79.zip`, 178,582,503 bytes;
+- SHA-256: `dd5f2b56e862180dd20a68574fe60b8e08d70f5561cde7f7381e0cc732287c60`;
+- SHP member:
+  `ll_gda2020/esrishape/whole_of_dataset/victoria/FLORAFAUNA1/WETLAND_CURRENT.shp`;
+- transform precision: seven decimal places;
+- GDAL 3.6.2 and PROJ package 9.1.1-1+b1; and
+- output: 427,540 source features in 444 cells, 231,905,550 cell bytes
+  (223 MiB on disk).
+
+An independent verification pass matched every generated cell's byte count,
+SHA-256, JSON structure and indexed feature count against `index.json`. The
+artifact is staged on the Docker host pending the application deployment that
+adds its serving contract and mount.
+
 ## Acquisition and release manifest
 
 DataVic redirects the SHP resource download action to a DataShare order flow;
@@ -43,7 +62,10 @@ identity above plus the delivered archive's exact:
 - direct HTTPS `datashare.maps.vic.gov.au` URL as `sourceArchive.downloadUrl`;
 - file name as `sourceArchive.fileName`;
 - byte length as `sourceArchive.bytes`; and
-- lowercase SHA-256 as `sourceArchive.sha256`.
+- lowercase SHA-256 as `sourceArchive.sha256`; and
+- the exact archive-relative `WETLAND_CURRENT.shp` path as
+  `sourceArchive.shapefilePath` (DataShare deliveries may nest it several
+  directories below the ZIP root).
 
 The small fixture manifest at
 `src/data/fixtures/vic-wetlands-2025/release-manifest.json` is the executable
@@ -54,7 +76,9 @@ production manifest.
 The script has no URL argument. Download mode reads only the URL from the
 reviewed manifest, requires HTTPS on `datashare.maps.vic.gov.au`, refuses
 redirects, streams under the pinned byte cap, verifies byte length and SHA-256,
-and renames the temporary file only after verification.
+and renames the temporary file only after verification. ZIP conversion also
+requires a normalized relative path ending exactly in `WETLAND_CURRENT.shp`;
+absolute paths, traversal segments and alternate layers are rejected.
 
 Production download and preprocessing:
 
@@ -76,7 +100,7 @@ node scripts/preprocess-vic-wetlands-2025.mjs \
 
 Production ZIP conversion requires `ogr2ogr` from GDAL. Record the exact GDAL
 and PROJ versions alongside each production release manifest/run. The script
-opens only the `WETLAND_CURRENT` layer and requests WGS84 GeoJSON Sequence output. A
+opens only the pinned `WETLAND_CURRENT.shp` member and requests WGS84 GeoJSON Sequence output. A
 `.geojson` source is accepted solely so the deterministic fixture can exercise
 the same transform without adding a package dependency.
 
@@ -104,12 +128,18 @@ Only these public properties survive preprocessing:
 
 - `id` from `WETLAND_NO`, namespaced by the source ID; if an official wetland
   number is reused, a deterministic content digest distinguishes the feature;
-- `wetlandType` from `WETLANDTYP` / `WETLAND_TYPE`;
-- `waterRegime` from `WTRREG`;
-- `source` from optional `EX_DATASET`;
-- `sourceConfidence` from optional `WTRREG_CON`;
+- `wetlandType` from the delivered SHP field `WTLND_TYPE` (with the longer
+  catalogue aliases retained for fixture/backward compatibility);
+- `waterRegime` from `WAT_REGIME`;
+- `source` from optional `SRCDATANAM`; and
+- `sourceConfidence` from optional `WATREGCONF`;
 - fixed `edition: "2025"`; and
 - fixed `referenceOnly: true`.
+
+Polygon exteriors that cannot retain three distinct positions at the pinned
+release precision still fail closed. Interior holes smaller than that precision
+are omitted rather than causing an otherwise valid official wetland polygon to
+be dropped.
 
 The archive identity and SHA-256 prove the edition. `VERS_DATE` and `EDIT_YEAR`
 are feature-lineage fields and may legitimately predate 2025, so they are not

@@ -74,6 +74,16 @@ function assertReleaseManifest(manifest) {
   if (!Number.isSafeInteger(manifest.sourceArchive?.bytes) || manifest.sourceArchive.bytes <= 0) {
     fail('sourceArchive.bytes must be a positive integer');
   }
+  if (String(manifest.sourceArchive?.fileName || '').toLowerCase().endsWith('.zip')) {
+    const shapefilePath = manifest.sourceArchive?.shapefilePath;
+    if (typeof shapefilePath !== 'string' || shapefilePath.length > 512
+      || shapefilePath !== path.posix.normalize(shapefilePath)
+      || shapefilePath.startsWith('/') || shapefilePath.includes('\\')
+      || shapefilePath.split('/').some((segment) => !segment || segment === '.' || segment === '..')
+      || path.posix.basename(shapefilePath).toUpperCase() !== 'WETLAND_CURRENT.SHP') {
+      fail('sourceArchive.shapefilePath must safely pin WETLAND_CURRENT.shp inside the ZIP');
+    }
+  }
   for (const [key, ceiling] of Object.entries(HARD_LIMITS)) {
     const value = manifest.limits?.[key];
     if (!Number.isSafeInteger(value) || value <= 0 || value > ceiling) {
@@ -174,7 +184,7 @@ export async function downloadPinnedArchive({ manifest: inputManifest, destinati
   return destinationPath;
 }
 
-async function* sourceFeatures(sourcePath) {
+async function* sourceFeatures(sourcePath, manifest) {
   if (path.extname(sourcePath).toLowerCase() === '.geojson') {
     const collection = JSON.parse(await readFile(sourcePath, 'utf8'));
     if (collection?.type !== 'FeatureCollection' || !Array.isArray(collection.features)) {
@@ -195,7 +205,7 @@ async function* sourceFeatures(sourcePath) {
   }
   if (header[0] !== 0x50 || header[1] !== 0x4b) fail('pinned SHP archive is not a ZIP file');
   const child = spawn('ogr2ogr', [
-    '-f', 'GeoJSONSeq', '/vsistdout/', `/vsizip/${sourcePath}`, 'WETLAND_CURRENT',
+    '-f', 'GeoJSONSeq', '/vsistdout/', `/vsizip/${sourcePath}/${manifest.sourceArchive.shapefilePath}`,
     '-t_srs', 'EPSG:4326', '-lco', 'RS=YES',
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
@@ -269,7 +279,7 @@ function samePoint(left, right) {
   return left?.[0] === right?.[0] && left?.[1] === right?.[1];
 }
 
-function processRing(ring, transform) {
+function processRing(ring, transform, featureId = '', allowCollapse = false) {
   if (!Array.isArray(ring) || ring.length < 4) fail('polygon ring must contain at least four positions');
   const rounded = ring.map((position) => {
     if (!Array.isArray(position) || position.length < 2
@@ -286,8 +296,14 @@ function processRing(ring, transform) {
   });
   const open = samePoint(rounded[0], rounded.at(-1)) ? rounded.slice(0, -1) : rounded;
   const simplified = simplifyOpenRing(open, transform.simplifyToleranceDegrees);
-  const deduplicated = simplified.filter((position, index) => index === 0 || !samePoint(position, simplified[index - 1]));
-  if (deduplicated.length < 3) fail('simplification collapsed a polygon ring');
+  let deduplicated = simplified.filter((position, index) => index === 0 || !samePoint(position, simplified[index - 1]));
+  if (deduplicated.length < 3) {
+    deduplicated = open.filter((position, index) => index === 0 || !samePoint(position, open[index - 1]));
+  }
+  if (deduplicated.length < 3) {
+    if (allowCollapse) return null;
+    fail(`${featureId ? `${featureId} ` : ''}simplification collapsed a polygon ring`);
+  }
   return [...deduplicated, [...deduplicated[0]]];
 }
 
@@ -329,14 +345,15 @@ function processFeature(feature, manifest, counters) {
   for (const polygon of polygons) {
     if (!Array.isArray(polygon) || polygon.length === 0) fail(`${sourceId} has an empty polygon`);
     const outputRings = [];
-    for (const ring of polygon) {
+    for (const [ringIndex, ring] of polygon.entries()) {
       rings += 1;
       inputCoordinates += Array.isArray(ring) ? ring.length : 0;
       if (rings > manifest.limits.maxRingsPerFeature
         || inputCoordinates > manifest.limits.maxCoordinatesPerFeature) {
         fail(`${sourceId} exceeds per-feature geometry limits`);
       }
-      const outputRing = processRing(ring, manifest.transform);
+      const outputRing = processRing(ring, manifest.transform, sourceId, ringIndex > 0);
+      if (outputRing === null) continue;
       outputCoordinates += outputRing.length;
       outputRings.push(outputRing);
     }
@@ -348,10 +365,10 @@ function processFeature(feature, manifest, counters) {
 
   const properties = {
     id: null,
-    wetlandType: requiredText(feature.properties, ['WETLANDTYP', 'WETLAND_TYPE'], 'WETLAND_TYPE'),
-    waterRegime: requiredText(feature.properties, ['WTRREG', 'WATER_REGIME'], 'WTRREG'),
-    source: optionalText(feature.properties, ['EX_DATASET', 'SOURCE_DATASET']),
-    sourceConfidence: optionalText(feature.properties, ['WTRREG_CON', 'WATER_REGIME_CONFIDENCE']),
+    wetlandType: requiredText(feature.properties, ['WTLND_TYPE', 'WETLANDTYP', 'WETLAND_TYPE'], 'WTLND_TYPE'),
+    waterRegime: requiredText(feature.properties, ['WAT_REGIME', 'WTRREG', 'WATER_REGIME'], 'WAT_REGIME'),
+    source: optionalText(feature.properties, ['SRCDATANAM', 'EX_DATASET', 'SOURCE_DATASET']),
+    sourceConfidence: optionalText(feature.properties, ['WATREGCONF', 'WTRREG_CON', 'WATER_REGIME_CONFIDENCE']),
     edition: manifest.edition,
     referenceOnly: true,
   };
@@ -504,7 +521,7 @@ export async function buildVicWetlands2025({ releaseManifestPath, sourcePath, ou
       await appendFile(path.join(stagingPath, `${cellId}.ndjson`), buffered);
       cellBuffers.set(cellId, '');
     };
-    for await (const feature of sourceFeatures(sourcePath)) {
+    for await (const feature of sourceFeatures(sourcePath, manifest)) {
       if (counters.ids.size >= manifest.limits.maxFeatures) fail('source exceeds feature limit');
       const processed = processFeature(feature, manifest, counters);
       const cellIds = cellIdsForBounds(geometryBounds(processed.geometry), manifest);
