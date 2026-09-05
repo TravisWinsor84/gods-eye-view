@@ -69,3 +69,16 @@
   Node-version allocation-benchmark skip; production build passed at 161
   modules; `git diff --check` passed. Independent re-review remains pending;
   no push or deployment occurred.
+- Task 2 re-review 1 confirmed four findings resolved but found one remaining
+  P2: a non-empty short transfer-limited ArcGIS page advanced by returned rows
+  rather than the server-owned requested record window, allowing overlap,
+  duplicate IDs and omitted second-window rows under a falsely current result.
+- Task 2 fix round 2/5 added a RED-first short-page regression. A 500-row
+  request initially observed offsets `[0, 2]`; after the one-line correction,
+  empty, short and full transfer-limited pages all advance by the prior
+  `resultRecordCount`, preserving the two-page cap and review-clean behavior.
+- Fresh round-two verification: focused GA/source/proxy/credit/layer suites
+  passed 81/81; the full suite passed 2,802 with 0 failures and 1 expected
+  Node-version allocation-benchmark skip; production build passed at 161
+  modules. Independent re-review remains pending; no push or deployment
+  occurred.

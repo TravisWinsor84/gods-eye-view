@@ -136,3 +136,42 @@ passed
 
 Independent re-review remains pending. Browser-visible category-layer proof is
 still Task 6, and nothing has been pushed or deployed.
+
+## Independent-review fix round 2
+
+The first re-review found one remaining P2 in the ArcGIS paging contract: a
+non-empty short page with `exceededTransferLimit=true` advanced by its returned
+feature count instead of the server-owned requested record window. That could
+re-enter the prior window, duplicate normalized feature IDs, omit intended
+second-window rows and still report the result as current.
+
+Fix round 2 always advances `resultOffset` by the prior request's bounded
+`resultRecordCount`. This is the same rule for empty, short and full
+transfer-limited pages and preserves the existing two-page hard cap.
+
+TDD RED was observed before the production change. A 500-row request whose
+first page returned two rows with `exceededTransferLimit=true` produced offsets
+`[0, 2]` instead of `[0, 500]`. The fixture's offset-2 response deliberately
+overlapped a first-page feature, while the offset-500 response contained the
+intended second-window rows. After the one-line paging correction, the test
+proved offsets `[0, 500]`, four expected titles, four unique normalized IDs and
+honest `fresh`/`current` status.
+
+Fresh fix-round verification:
+
+```text
+node --test src/data/gaRegionalSources.test.mjs src/data/regionalSources.test.mjs src/data/regionalProxy.test.mjs src/data/dataCredits.test.mjs src/data/regionalLayer.test.mjs
+81 passed, 0 failed
+
+npm test
+2,802 passed, 0 failed, 1 expected Node-version allocation-benchmark skip
+
+npm run build
+passed; Vite transformed 161 modules
+
+git diff --check
+passed
+```
+
+Independent re-review remains pending. Browser-visible category-layer proof is
+still Task 6, and nothing has been pushed or deployed.

@@ -156,6 +156,45 @@ test('regional proxy follows bounded ArcGIS pagination without allowing viewport
   assert.doesNotMatch(response.body, /private-id/);
 });
 
+test('regional proxy advances a short transfer-limited ArcGIS page by the requested window', async () => {
+  const offsets = [];
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      const offset = Number(new URL(input).searchParams.get('resultOffset'));
+      offsets.push(offset);
+      const featuresByOffset = {
+        0: [
+          gaPoint({ name: 'First Window A', authority: 'VIC' }, 144.91),
+          gaPoint({ name: 'First Window B', authority: 'VIC' }, 144.92),
+        ],
+        2: [
+          gaPoint({ name: 'First Window B', authority: 'VIC' }, 144.92),
+          gaPoint({ name: 'Overlapping Wrong Window', authority: 'VIC' }, 144.93),
+        ],
+        500: [
+          gaPoint({ name: 'Second Window A', authority: 'VIC' }, 144.94),
+          gaPoint({ name: 'Second Window B', authority: 'VIC' }, 144.95),
+        ],
+      };
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: featuresByOffset[offset] || [],
+        exceededTransferLimit: offset === 0,
+      });
+    },
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'fresh');
+  assert.deepEqual(offsets, [0, 500]);
+  const body = JSON.parse(response.body);
+  assert.deepEqual(body.features.map((feature) => feature.properties.title), [
+    'First Window A', 'First Window B', 'Second Window A', 'Second Window B',
+  ]);
+  assert.equal(new Set(body.features.map((feature) => feature.id)).size, body.features.length);
+  assert.equal(body.sourceStatus.status, 'current');
+});
+
 test('regional proxy continues after an empty ArcGIS transfer-limited page', async () => {
   const offsets = [];
   const response = await invokeRegional(createRegionalProxy({
