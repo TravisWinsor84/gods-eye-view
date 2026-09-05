@@ -48,15 +48,15 @@ function bay(overrides = {}) {
 
 test('builds only fixed Opendatasoft v2.1 spatial requests for civic datasets', () => {
   const expected = new Map([
-    ['melbourne-drinking-fountains', [['drinking-fountains', 'geo_point_2d']]],
-    ['melbourne-barbecues', [['public-barbecues', 'geo_point_2d']]],
-    ['melbourne-development', [['development-activity-monitor', 'geopoint']]],
-    ['melbourne-culture', [['outdoor-artworks', 'geo_point_2d'], ['public-memorials-and-sculptures', 'co_ordinates']]],
+    ['melbourne-drinking-fountains', [['drinking-fountains', 'geo_point_2d', 'assetid']]],
+    ['melbourne-barbecues', [['public-barbecues', 'geo_point_2d', 'assetid']]],
+    ['melbourne-development', [['development-activity-monitor', 'geopoint', 'development_key']]],
+    ['melbourne-culture', [['outdoor-artworks', 'geo_point_2d', 'asset_id'], ['public-memorials-and-sculptures', 'co_ordinates', 'title,description']]],
   ]);
 
   for (const [sourceId, datasets] of expected) {
     const requests = melbourneCivicSpatialRequests(sourceId, BBOX, 500);
-    assert.deepEqual(requests.map(({ dataset, geometryField }) => [dataset, geometryField]), datasets);
+    assert.deepEqual(requests.map(({ dataset, geometryField, orderBy }) => [dataset, geometryField, orderBy]), datasets);
     for (const request of requests) {
       assert.equal(request.url.origin, 'https://data.melbourne.vic.gov.au');
       assert.equal(request.url.pathname, `/api/explore/v2.1/catalog/datasets/${request.dataset}/records`);
@@ -64,6 +64,7 @@ test('builds only fixed Opendatasoft v2.1 spatial requests for civic datasets', 
       assert.equal(request.url.searchParams.get('offset'), '0');
       assert.match(request.url.searchParams.get('where'), new RegExp(`^in_bbox\\(${request.geometryField}, -37\\.9, 144\\.9, -37\\.8, 145\\)$`));
       assert.ok(request.url.searchParams.get('select'));
+      assert.ok(request.url.searchParams.get('order_by'), `${request.dataset} must have deterministic pagination`);
       assert.doesNotMatch(request.url.searchParams.get('select'), /assetid|asset_id|company|contract|manager|property_id|development_key|street_address|planning_application|history|inscription/i);
     }
   }
@@ -116,17 +117,42 @@ test('parking joins once into a spatial index before viewport filtering', () => 
   }, { nowMs: NOW, maxFeatures: 10 }).features.length, 1);
 });
 
-test('civic asset adapters expose only bounded public inventory fields', () => {
+test('duplicate parking bays select the spatially nearest sensor match then deterministic recency', () => {
+  const liveSensor = sensor({
+    kerbsideid: 17212,
+    location: { lon: 144.9594132, lat: -37.8038190 },
+  });
+  const index = buildMelbourneParkingIndex([liveSensor], [
+    bay({ kerbsideid: 17212, roadsegmentdescription: 'Wellington Parade South', lastupdated: '2025-06-03', location: { lon: 144.9753201, lat: -37.8160071 } }),
+    bay({ kerbsideid: 17212, roadsegmentdescription: 'Berkeley Street', lastupdated: '2025-09-03', location: { lon: 144.9594192, lat: -37.8038058 } }),
+  ]);
+  const result = queryMelbourneParkingIndex(index, BBOX, { nowMs: NOW, maxFeatures: 10 });
+  assert.equal(result.features.length, 1);
+  assert.deepEqual(result.features[0].geometry.coordinates, [144.9594192, -37.8038058]);
+  assert.equal(result.features[0].properties.title, 'On-street parking sensor');
+  assert.doesNotMatch(JSON.stringify(result), /17212/);
+});
+
+test('duplicate parking bays fall back to latest finite update when sensor coordinates are invalid', () => {
+  const index = buildMelbourneParkingIndex([sensor({ kerbsideid: 7, location: null })], [
+    bay({ kerbsideid: 7, lastupdated: '2024-01-01', location: { lon: 144.951, lat: -37.851 } }),
+    bay({ kerbsideid: 7, lastupdated: '2026-01-01', location: { lon: 144.952, lat: -37.852 } }),
+  ]);
+  const result = queryMelbourneParkingIndex(index, BBOX, { nowMs: NOW, maxFeatures: 10 });
+  assert.deepEqual(result.features[0].geometry.coordinates, [144.952, -37.852]);
+});
+
+test('civic asset adapters expose only minimal address-safe public inventory fields', () => {
   const feature = normalizeMelbourneCivicRecord('melbourne-drinking-fountains', {
     assetid: 'private-asset-id',
     type: 'Drinking Fountain',
-    description: 'Stainless steel drinking fountain',
+    description: 'Barbeque - Urban Design Single Hotplate - 160-206 Lorimer Street Nature Strip',
     company: 'City of Melbourne',
     contract: 'Civil Infrastructure Services',
     assetmanager: 'City Infrastructure',
     primaryservicemanager: 'City Infrastructure',
     modelno: 'secret-model',
-    propertyname: 'Carlton Gardens',
+    propertyname: '150 Collins Street',
     roadsegmentdescription: 'Rathdowne Street between Victoria Street and Carlton Street',
     evaluationdate: '2026-02-28',
     geo_point_2d: { lon: 144.971, lat: -37.805 },
@@ -134,13 +160,11 @@ test('civic asset adapters expose only bounded public inventory fields', () => {
   assert.deepEqual(feature.properties, {
     title: 'Drinking Fountain',
     type: 'Drinking Fountain',
-    locality: 'Carlton Gardens',
-    description: 'Stainless steel drinking fountain',
     inventoryAsOf: '2026-02-28',
     freshnessClass: 'inventory',
     caveat: 'Asset inventory only; presence does not guarantee current condition or operability.',
   });
-  assert.doesNotMatch(JSON.stringify(feature), /private-asset-id|contract|manager|secret-model|Rathdowne/i);
+  assert.doesNotMatch(JSON.stringify(feature), /private-asset-id|contract|manager|secret-model|Rathdowne|Lorimer|Collins/i);
 });
 
 test('development omits identifiers and full address and remains monthly context', () => {
@@ -158,12 +182,12 @@ test('development omits identifiers and full address and remains monthly context
   assert.doesNotMatch(JSON.stringify(feature), /X000557|100435|100436|Anderson|TP-123/);
 });
 
-test('culture keeps minimal metadata, uses declared geometry and bounds free text', () => {
+test('culture keeps minimal address-safe metadata and uses declared geometry', () => {
   const feature = normalizeMelbourneCivicRecord('melbourne-culture', {
     asset_id: 1559911,
     title: 'Anchor', object_type: 'Sculpture', classification: 'Sculpture', art_date: '2005',
-    property: 'Victoria Point', location: '758 Bourke Street, Docklands, 3008',
-    description: `Public description ${'x'.repeat(400)}`,
+    property: '150 Collins Street', location: '758 Bourke Street, Docklands, 3008',
+    description: 'Artwork beside 160-206 Lorimer Street',
     history: 'long private history', inscription: 'long inscription', company: 'VicUrban', service_manager: 'Manager',
     latitude: 144.9474, longitude: -37.8182,
     geo_point_2d: { lon: 144.9474, lat: -37.8182 },
@@ -172,9 +196,9 @@ test('culture keeps minimal metadata, uses declared geometry and bounds free tex
   assert.equal(feature.properties.title, 'Anchor');
   assert.equal(feature.properties.type, 'Sculpture');
   assert.equal(feature.properties.date, '2005');
-  assert.equal(feature.properties.locality, 'Victoria Point');
-  assert.ok(feature.properties.description.length <= 240);
-  assert.doesNotMatch(JSON.stringify(feature), /1559911|long private history|long inscription|VicUrban|Manager|758 Bourke/i);
+  assert.equal('locality' in feature.properties, false);
+  assert.equal('description' in feature.properties, false);
+  assert.doesNotMatch(JSON.stringify(feature), /1559911|long private history|long inscription|VicUrban|Manager|Bourke|Lorimer|Collins/i);
 });
 
 test('provider-wide parking tables download once, coalesce bbox calls and filter after joining', async () => {
@@ -234,10 +258,97 @@ test('parking retains source-local last-good tables when one later download fail
   phase = 'refresh';
   const result = await client.load('melbourne-parking-live', { bbox: BBOX, maxFeatures: 1_000 });
   assert.equal(result.features.length, 1);
-  assert.equal(result.sourceStatus.status, 'partial');
+  assert.equal(result.sourceStatus.status, 'stale');
   assert.equal(result.sourceStatus.tables.sensors.status, 'stale');
   assert.equal(result.sourceStatus.tables.bays.status, 'current');
   assert.doesNotMatch(JSON.stringify(result), /503|upstream|on-street-parking-bay/i);
+});
+
+for (const failedTable of ['sensors', 'bays']) {
+  test(`parking expires inherited ${failedTable} table even while its sibling refreshes`, async () => {
+    let clock = NOW;
+    let warm = true;
+    const client = createMelbourneCivicClient({
+      now: () => clock,
+      fetchImpl: async (input) => {
+        const dataset = new URL(input).pathname.split('/').at(-3);
+        const isSensors = dataset === 'on-street-parking-bay-sensors';
+        if (!warm && ((failedTable === 'sensors' && isSensors) || (failedTable === 'bays' && !isSensors))) {
+          return jsonResponse({}, 503);
+        }
+        return jsonResponse([isSensors ? sensor({ kerbsideid: 1 }) : bay({ kerbsideid: 1 })]);
+      },
+    });
+    assert.equal((await client.load('melbourne-parking-live', { bbox: BBOX, maxFeatures: 100 })).features.length, 1);
+    warm = false;
+    for (let elapsed = 120_001; elapsed <= 720_006; elapsed += 120_001) {
+      clock = NOW + elapsed;
+      const result = await client.load('melbourne-parking-live', { bbox: BBOX, maxFeatures: 100 });
+      if (elapsed <= 600_000) assert.equal(result.features.length, 1);
+      else assert.equal(result.features.length, 0);
+    }
+  });
+}
+
+test('an all-stale parking response is degraded while mixed freshness preserves counts', async () => {
+  const responses = [
+    [sensor({ kerbsideid: 1, status_timestamp: '2026-09-05T04:00:00Z' }), sensor({ kerbsideid: 2, status_timestamp: '2026-09-05T05:23:00Z' })],
+    [bay({ kerbsideid: 1 }), bay({ kerbsideid: 2, location: { lon: 144.965, lat: -37.814 } })],
+  ];
+  let index = 0;
+  const client = createMelbourneCivicClient({ now: () => NOW, fetchImpl: async () => jsonResponse(responses[index++]) });
+  const mixed = await client.load('melbourne-parking-live', { bbox: BBOX, maxFeatures: 100 });
+  assert.equal(mixed.sourceStatus.staleRecords, 1);
+  assert.equal(mixed.sourceStatus.currentRecords, 1);
+  assert.equal(mixed.sourceStatus.status, 'partial');
+});
+
+test('all stale parking observations report stale with zero current records', async () => {
+  let call = 0;
+  const client = createMelbourneCivicClient({
+    now: () => NOW,
+    fetchImpl: async () => jsonResponse(call++ === 0
+      ? [sensor({ kerbsideid: 1, status_timestamp: '2026-09-05T04:00:00Z' })]
+      : [bay({ kerbsideid: 1 })]),
+  });
+  const result = await client.load('melbourne-parking-live', { bbox: BBOX, maxFeatures: 100 });
+  assert.equal(result.sourceStatus.status, 'stale');
+  assert.equal(result.sourceStatus.staleRecords, 1);
+  assert.equal(result.sourceStatus.currentRecords, 0);
+});
+
+test('rejects JSON-shaped civic responses served as text/html without caching them', async () => {
+  let calls = 0;
+  const client = createMelbourneCivicClient({
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ total_count: 0, results: [] }), { status: 200, headers: { 'Content-Type': 'text/html' } });
+    },
+  });
+  await assert.rejects(client.load('melbourne-drinking-fountains', { bbox: BBOX, maxFeatures: 100 }), (error) => error?.code === 'INVALID_MEDIA_TYPE');
+  await assert.rejects(client.load('melbourne-drinking-fountains', { bbox: BBOX, maxFeatures: 100 }), (error) => error?.code === 'INVALID_MEDIA_TYPE');
+  assert.equal(calls, 2);
+});
+
+test('deduplicates overlapping ordered spatial pages and reports partial', async () => {
+  const offsets = [];
+  const client = createMelbourneCivicClient({
+    limits: { pageRows: 2 },
+    fetchImpl: async (input) => {
+      const url = new URL(input);
+      offsets.push([url.searchParams.get('offset'), url.searchParams.get('order_by')]);
+      const rows = Number(url.searchParams.get('offset')) === 0
+        ? [{ type: 'Drinking Fountain', evaluationdate: '2026-01-01', geo_point_2d: { lon: 144.95, lat: -37.85 } }, { type: 'Drinking Fountain', evaluationdate: '2026-01-02', geo_point_2d: { lon: 144.951, lat: -37.851 } }]
+        : [{ type: 'Drinking Fountain', evaluationdate: '2026-01-02', geo_point_2d: { lon: 144.951, lat: -37.851 } }, { type: 'Drinking Fountain', evaluationdate: '2026-01-03', geo_point_2d: { lon: 144.952, lat: -37.852 } }];
+      return jsonResponse({ total_count: 4, results: rows });
+    },
+  });
+  const result = await client.load('melbourne-drinking-fountains', { bbox: BBOX, maxFeatures: 10 });
+  assert.deepEqual(offsets.map(([offset]) => offset), ['0', '2']);
+  assert.ok(offsets.every(([, order]) => order));
+  assert.equal(result.features.length, 3);
+  assert.equal(result.sourceStatus.status, 'partial');
+  assert.equal(result.sourceStatus.datasets[0].duplicates, 1);
 });
 
 test('culture retains one dataset when its sibling fails and marks the source partial', async () => {
@@ -303,7 +414,7 @@ test('the page byte ceiling stops reading an oversized streaming response early'
   });
   const client = createMelbourneCivicClient({
     limits: { pageBytes: 8 },
-    fetchImpl: async () => new Response(body, { status: 200 }),
+    fetchImpl: async () => new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } }),
   });
   await assert.rejects(
     client.load('melbourne-drinking-fountains', { bbox: BBOX, maxFeatures: 500 }),
@@ -317,7 +428,7 @@ test('concurrent civic datasets share one hard aggregate byte budget', async () 
   const payload = JSON.stringify({ total_count: 0, results: [] });
   const client = createMelbourneCivicClient({
     limits: { pageBytes: 40, totalBytes: 50 },
-    fetchImpl: async () => new Response(payload, { status: 200 }),
+    fetchImpl: async () => new Response(payload, { status: 200, headers: { 'Content-Type': 'application/json' } }),
   });
   const result = await client.load('melbourne-culture', { bbox: BBOX, maxFeatures: 500 });
   assert.equal(result.sourceStatus.status, 'partial');

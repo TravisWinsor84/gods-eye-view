@@ -44,6 +44,10 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['au-place-names'].credential, 'none');
   assert.equal(REGIONAL_SOURCES['melbourne-parking-live'].refreshMs, 120_000);
   assert.equal(REGIONAL_SOURCES['melbourne-parking-live'].maxStaleMs, 600_000);
+  assert.equal(REGIONAL_SOURCES['melbourne-drinking-fountains'].maxStaleMs, 259_200_000);
+  assert.equal(REGIONAL_SOURCES['melbourne-barbecues'].maxStaleMs, 259_200_000);
+  assert.match(REGIONAL_SOURCES['melbourne-drinking-fountains'].refresh, /publisher source cadence is daily/i);
+  assert.match(REGIONAL_SOURCES['melbourne-barbecues'].refresh, /three missed publisher cycles/i);
   assert.equal(REGIONAL_SOURCES['melbourne-culture'].geometry, 'point');
   assert.ok(Number.isInteger(REGIONAL_SOURCES['melbourne-trees'].maxFeatures));
 });

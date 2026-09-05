@@ -126,6 +126,18 @@ test('regional proxy delegates Melbourne civic sources with only validated sourc
   }]);
 });
 
+test('regional proxy maps all-stale civic observations to a degraded header', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    melbourneCivicClient: {
+      async load() {
+        return { type: 'FeatureCollection', features: [], sourceStatus: { status: 'stale', staleRecords: 2, currentRecords: 0 } };
+      },
+    },
+  }), `/api/regional/melbourne-parking-live${MELBOURNE_BOUNDS}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+});
+
 test('Melbourne civic last-good data expires at the source-specific stale ceiling', async () => {
   let clock = 1_000_000;
   let fail = false;
@@ -513,6 +525,41 @@ test('regional proxy releases GA provider capacity after failures and aborts', a
   const recovered = await invokeRegional(middleware, '/api/regional/au-emergency-facilities?west=145&south=-37.9&east=145.1&north=-37.8');
 
   assert.equal(failed.status, 502);
+  assert.equal(recovered.status, 200);
+  assert.ok(maxActive <= 4);
+});
+
+test('regional proxy shares four actual request slots across GA and civic fan-out and recovers after failure', async () => {
+  let active = 0;
+  let maxActive = 0;
+  let failOneCivic = true;
+  const middleware = createRegionalProxy({
+    fetchImpl: async (input) => {
+      const url = new URL(input);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 4));
+        if (failOneCivic && url.pathname.includes('public-memorials-and-sculptures')) return regionalResponseJson({}, 503);
+        if (url.hostname === 'services.ga.gov.au') {
+          return regionalResponseJson({ type: 'FeatureCollection', features: [] });
+        }
+        return regionalResponseJson({ total_count: 0, results: [] });
+      } finally {
+        active -= 1;
+      }
+    },
+  });
+  const first = await Promise.all([
+    invokeRegional(middleware, `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`),
+    invokeRegional(middleware, `/api/regional/melbourne-culture${MELBOURNE_BOUNDS}`),
+    invokeRegional(middleware, '/api/regional/melbourne-culture?west=145&south=-37.9&east=145.1&north=-37.8'),
+  ]);
+  assert.deepEqual(first.map(({ status }) => status), [200, 200, 200]);
+  assert.ok(maxActive <= 4, `expected at most four actual provider requests, observed ${maxActive}`);
+
+  failOneCivic = false;
+  const recovered = await invokeRegional(middleware, '/api/regional/melbourne-culture?west=145.2&south=-37.9&east=145.3&north=-37.8');
   assert.equal(recovered.status, 200);
   assert.ok(maxActive <= 4);
 });

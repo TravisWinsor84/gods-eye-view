@@ -89,3 +89,57 @@ from an arbitrary or maximum row.
 
 Independent review and Task 6 browser-visible category integration remain
 separate gates.
+
+## Fix round 1/5 — independent-review findings
+
+Fix round 1 resolves all eight findings from `task-3-review.md`:
+
+- each parking table now carries its immutable `lastSuccessfulAt`; a successful
+  sibling refresh cannot renew an inherited failed table, and either table is
+  removed from joins after the ten-minute last-good ceiling;
+- duplicate kerbside bays are retained as candidates and selected by nearest
+  valid sensor coordinate, then latest finite provider update, then a stable
+  deterministic tie key. The live `17212` shape selects the near-sensor
+  Berkeley geometry without returning the provider ID or road address;
+- aggregate parking status now counts current and stale observations. Mixed
+  results are partial and an all-stale result is stale, producing a degraded
+  proxy header rather than a fresh claim;
+- one FIFO semaphore now limits actual GA, Melbourne civic and existing
+  regional provider fetch/read operations to four. Permit transfer is atomic,
+  queued requests start their timeout only after acquiring a slot, failures
+  release capacity, and the separate PTV path is unchanged;
+- fountains/barbecues now expose only type, inventory date and geometry;
+  culture exposes only bounded title, type and date. Address-bearing
+  description/property fields and parking road descriptions are neither
+  requested nor returned;
+- civic responses must use `application/json` or an application `+json`
+  variant. Wrong media types are rejected before body parsing or caching;
+- every offset-paginated spatial dataset uses a live-validated fixed
+  `order_by`. Internal `assetid`, `development_key`, and `asset_id` fields are
+  ordering-only and are never selected, normalized or emitted. Public memorials
+  use fixed title/description ordering. Overlapping pages are deduplicated by
+  derived public feature identity and reported partial/capped; and
+- current City of Melbourne metadata records Daily cadence for fountains and
+  barbecues. Their last-good ceiling is now three missed daily publisher cycles
+  (72 hours), while the six-hour application refresh remains conservative.
+
+### Fresh live smoke — 2026-09-05
+
+The same Melbourne bbox returned 245 fountains (current), 44 barbecues
+(current), 991 unique development points (partial/capped after defensive page
+deduplication), 319 culture points (current), and 1,000 parking points
+(partial/capped; 997 stale and 3 current observations). All five fixed ordering
+contracts and JSON media types were accepted by the official provider.
+
+### Fresh verification after fix round 1
+
+- Focused Task 3 plus shared proxy/GA/PTV concurrency suites: 110 passed, 0
+  failed.
+- Full `npm test`: 2,832 passed, 0 failed, 1 expected skip. The skipped
+  allocation microbenchmarks remain calibrated for Node 24; verification ran
+  on Node 26.8.1.
+- `npm run build`: passed; Vite transformed 162 modules.
+- `git diff --check`: passed.
+
+No pack membership, push, deployment, account, credential or provider mutation
+was performed. Independent re-review remains the next gate.

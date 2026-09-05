@@ -5,6 +5,7 @@ const DEFAULT_TOTAL_BYTES = 32 * 1024 * 1024;
 const DEFAULT_SPATIAL_REQUESTS = 12;
 const PARKING_CACHE_MS = 120_000;
 const PARKING_STALE_MS = 5 * 60_000;
+const PARKING_LAST_GOOD_MS = 10 * 60_000;
 
 export const CITY_OF_MELBOURNE_CREDIT = 'City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.';
 
@@ -12,28 +13,33 @@ const SPATIAL_DATASETS = Object.freeze({
   'melbourne-drinking-fountains': Object.freeze([Object.freeze({
     dataset: 'drinking-fountains',
     geometryField: 'geo_point_2d',
-    select: 'type,description,propertyname,evaluationdate,geo_point_2d',
+    select: 'type,evaluationdate,geo_point_2d',
+    orderBy: 'assetid',
   })]),
   'melbourne-barbecues': Object.freeze([Object.freeze({
     dataset: 'public-barbecues',
     geometryField: 'geo_point_2d',
-    select: 'type,description,propertyname,evaluationdate,geo_point_2d',
+    select: 'type,evaluationdate,geo_point_2d',
+    orderBy: 'assetid',
   })]),
   'melbourne-development': Object.freeze([Object.freeze({
     dataset: 'development-activity-monitor',
     geometryField: 'geopoint',
     select: 'status,year_completed,clue_small_area,floors_above,resi_dwellings,hotel_rooms,geopoint',
+    orderBy: 'development_key',
   })]),
   'melbourne-culture': Object.freeze([
     Object.freeze({
       dataset: 'outdoor-artworks',
       geometryField: 'geo_point_2d',
-      select: 'title,object_type,classification,art_date,property,description,geo_point_2d',
+      select: 'title,object_type,classification,art_date,geo_point_2d',
+      orderBy: 'asset_id',
     }),
     Object.freeze({
       dataset: 'public-memorials-and-sculptures',
       geometryField: 'co_ordinates',
-      select: 'title,description,co_ordinates',
+      select: 'title,co_ordinates',
+      orderBy: 'title,description',
     }),
   ]),
 });
@@ -47,7 +53,7 @@ const PARKING_TABLES = Object.freeze({
   }),
   bays: Object.freeze({
     dataset: 'on-street-parking-bays',
-    select: 'roadsegmentid,kerbsideid,roadsegmentdescription,latitude,longitude,lastupdated,location',
+    select: 'kerbsideid,latitude,longitude,lastupdated,location',
     where: 'kerbsideid is not null',
     maxRows: 32_000,
     maxBytes: 4 * 1024 * 1024,
@@ -134,6 +140,7 @@ export function melbourneCivicSpatialRequests(sourceId, bbox, maxFeatures) {
       select: config.select,
       where: `in_bbox(${config.geometryField}, ${bbox.south}, ${bbox.west}, ${bbox.north}, ${bbox.east})`,
       limit,
+      orderBy: config.orderBy,
     }),
   }));
 }
@@ -157,9 +164,8 @@ export function normalizeMelbourneParking(sensor, bay, { nowMs = Date.now() } = 
   const observedAt = cleanText(sensor.status_timestamp, 80);
   const observedMs = Date.parse(observedAt);
   const stale = !Number.isFinite(observedMs) || nowMs - observedMs > PARKING_STALE_MS || observedMs > nowMs + 60_000;
-  const road = cleanText(bay.roadsegmentdescription, 180);
   const properties = {
-    title: road ? `Parking sensor — ${road}` : 'On-street parking sensor',
+    title: 'On-street parking sensor',
     status,
     observedAt,
     sensorUpdatedAt: cleanText(sensor.lastupdated, 80),
@@ -186,13 +192,33 @@ export function buildMelbourneParkingIndex(sensors, bays) {
   const baysByKerbside = new Map();
   for (const bayRow of bays) {
     if (bayRow?.kerbsideid === null || bayRow?.kerbsideid === undefined) continue;
-    if (!baysByKerbside.has(String(bayRow.kerbsideid))) baysByKerbside.set(String(bayRow.kerbsideid), bayRow);
+    const key = String(bayRow.kerbsideid);
+    if (!baysByKerbside.has(key)) baysByKerbside.set(key, []);
+    baysByKerbside.get(key).push(bayRow);
   }
   const cells = new Map();
   let joinedRows = 0;
   let omittedWithoutGeometry = 0;
   for (const sensorRow of sensors) {
-    const bayRow = baysByKerbside.get(String(sensorRow?.kerbsideid));
+    const candidates = baysByKerbside.get(String(sensorRow?.kerbsideid)) || [];
+    const sensorCoordinates = pointFrom(sensorRow?.location);
+    const ranked = candidates.filter((candidate) => parkingCoordinates(candidate)).sort((left, right) => {
+      const leftCoordinates = parkingCoordinates(left);
+      const rightCoordinates = parkingCoordinates(right);
+      if (sensorCoordinates) {
+        const leftDistance = (leftCoordinates[0] - sensorCoordinates[0]) ** 2 + (leftCoordinates[1] - sensorCoordinates[1]) ** 2;
+        const rightDistance = (rightCoordinates[0] - sensorCoordinates[0]) ** 2 + (rightCoordinates[1] - sensorCoordinates[1]) ** 2;
+        if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+      }
+      const leftUpdated = Date.parse(left?.lastupdated);
+      const rightUpdated = Date.parse(right?.lastupdated);
+      const recency = (Number.isFinite(rightUpdated) ? rightUpdated : -Infinity) - (Number.isFinite(leftUpdated) ? leftUpdated : -Infinity);
+      if (recency !== 0) return recency;
+      const leftTie = `${leftCoordinates.join(',')}|${cleanText(left?.roadsegmentdescription, 180)}`;
+      const rightTie = `${rightCoordinates.join(',')}|${cleanText(right?.roadsegmentdescription, 180)}`;
+      return leftTie.localeCompare(rightTie);
+    });
+    const bayRow = ranked[0];
     const coordinates = parkingCoordinates(bayRow);
     if (!bayRow || !coordinates) {
       omittedWithoutGeometry += 1;
@@ -250,8 +276,6 @@ function assetRecord(sourceId, row, dataset) {
   const properties = {
     title: type,
     type,
-    ...(cleanText(row?.propertyname, 120) ? { locality: cleanText(row.propertyname, 120) } : {}),
-    ...(cleanText(row?.description, 240) ? { description: cleanText(row.description, 240) } : {}),
     ...(cleanText(row?.evaluationdate, 80) ? { inventoryAsOf: cleanText(row.evaluationdate, 80) } : {}),
     freshnessClass: 'inventory',
     caveat: 'Asset inventory only; presence does not guarantee current condition or operability.',
@@ -286,8 +310,6 @@ function cultureRecord(row, dataset) {
     type: cleanText(row?.object_type || row?.classification, 80)
       || (dataset === 'public-memorials-and-sculptures' ? 'Memorial or sculpture' : 'Public artwork'),
     ...(cleanText(row?.art_date, 40) ? { date: cleanText(row.art_date, 40) } : {}),
-    ...(cleanText(row?.property, 120) ? { locality: cleanText(row.property, 120) } : {}),
-    ...(cleanText(row?.description, 240) ? { description: cleanText(row.description, 240) } : {}),
     freshnessClass: 'reference',
     caveat: 'Reference metadata only; current condition and record-level media rights are not implied.',
   };
@@ -380,6 +402,7 @@ async function readJsonCapped(response, maxBytes, meter) {
 
 export function createMelbourneCivicClient({
   fetchImpl = fetch,
+  withRequestSlot = (operation) => operation(),
   now = () => Date.now(),
   timeoutMs = 20_000,
   limits = {},
@@ -392,25 +415,33 @@ export function createMelbourneCivicClient({
   let parkingInFlight = null;
 
   async function fetchPage(url, meter, responseBytes = pageBytes) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      const error = new Error('timeout');
-      error.code = 'TIMEOUT';
-      controller.abort(error);
-    }, timeoutMs);
-    try {
-      const response = await fetchImpl(url, {
-        method: 'GET', headers: { Accept: 'application/json' }, signal: controller.signal, redirect: 'error',
-      });
-      if (!response?.ok) {
-        const error = new Error('provider request failed');
-        error.code = 'UPSTREAM_FAILED';
-        throw error;
+    return withRequestSlot(async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        const error = new Error('timeout');
+        error.code = 'TIMEOUT';
+        controller.abort(error);
+      }, timeoutMs);
+      try {
+        const response = await fetchImpl(url, {
+          method: 'GET', headers: { Accept: 'application/json' }, signal: controller.signal, redirect: 'error',
+        });
+        if (!response?.ok) {
+          const error = new Error('provider request failed');
+          error.code = 'UPSTREAM_FAILED';
+          throw error;
+        }
+        const contentType = response.headers?.get?.('content-type') || '';
+        if (!/^application\/(?:[a-z0-9!#$&^_.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) {
+          const error = new Error('invalid provider media type');
+          error.code = 'INVALID_MEDIA_TYPE';
+          throw error;
+        }
+        return readJsonCapped(response, responseBytes, meter);
+      } finally {
+        clearTimeout(timer);
       }
-      return await readJsonCapped(response, responseBytes, meter);
-    } finally {
-      clearTimeout(timer);
-    }
+    });
   }
 
   async function downloadParkingTable(name, meter) {
@@ -432,6 +463,7 @@ export function createMelbourneCivicClient({
       status: capped ? 'partial' : 'current',
       capped,
       requestCount: 1,
+      lastSuccessfulAt: now(),
     };
   }
 
@@ -448,8 +480,11 @@ export function createMelbourneCivicClient({
       const name = names[index];
       const result = settled[index];
       if (result.status === 'fulfilled') tables[name] = result.value;
-      else if (prior?.[name]?.rows?.length) tables[name] = { ...prior[name], status: 'stale', failed: true };
-      else throw result.reason;
+      else if (prior?.[name]?.rows?.length && now() - prior[name].lastSuccessfulAt <= PARKING_LAST_GOOD_MS) {
+        tables[name] = { ...prior[name], status: 'stale', failed: true };
+      } else if (prior?.[name]) {
+        tables[name] = { ...prior[name], rows: [], status: 'unavailable', failed: true, expired: true };
+      } else throw result.reason;
     }
     parkingCache = {
       tables,
@@ -474,15 +509,19 @@ export function createMelbourneCivicClient({
       status: table.status,
       rows: table.rows.length,
       capped: table.capped === true,
+      lastSuccessfulAt: table.lastSuccessfulAt,
     }]));
-    const partial = sourceCapped || Object.values(tableStatus).some(({ status }) => status !== 'current');
     const staleRecords = normalized.features.filter(({ properties }) => properties.stale).length;
+    const currentRecords = normalized.features.length - staleRecords;
+    const allRecordsStale = normalized.features.length > 0 && currentRecords === 0;
+    const partial = sourceCapped || staleRecords > 0 || Object.values(tableStatus).some(({ status }) => status !== 'current');
     return {
       ...normalized,
       sourceStatus: {
-        status: partial ? 'partial' : 'current',
+        status: allRecordsStale ? 'stale' : partial ? 'partial' : 'current',
         capped: sourceCapped || Object.values(tableStatus).some(({ capped }) => capped),
         staleRecords,
+        currentRecords,
         tables: tableStatus,
       },
     };
@@ -493,6 +532,8 @@ export function createMelbourneCivicClient({
     const meter = { bytes: 0, maxBytes: totalBytes };
     const datasetResults = await Promise.all(initial.map(async (request) => {
       const rows = [];
+      const seen = new Set();
+      let duplicates = 0;
       let offset = 0;
       let totalCount = null;
       let requests = 0;
@@ -511,10 +552,18 @@ export function createMelbourneCivicClient({
             throw invalid;
           }
           totalCount = payload.total_count;
-          rows.push(...payload.results);
+          for (const row of payload.results) {
+            const normalized = normalizeMelbourneCivicRecord(sourceId, row, { dataset: request.dataset });
+            const identity = normalized?.id || stableHash(JSON.stringify(row));
+            if (seen.has(identity)) duplicates += 1;
+            else {
+              seen.add(identity);
+              rows.push(row);
+            }
+          }
           requests += 1;
-          if (offset + requestRows >= totalCount) break;
           offset += requestRows;
+          if (offset >= totalCount) break;
         } catch (error) {
           failure = error;
           break;
@@ -523,8 +572,9 @@ export function createMelbourneCivicClient({
       return {
         dataset: request.dataset,
         results: rows,
-        status: failure || (totalCount !== null && rows.length < totalCount) ? 'partial' : 'current',
-        capped: !failure && totalCount !== null && rows.length < totalCount,
+        status: failure || duplicates > 0 || (totalCount !== null && offset < totalCount) ? 'partial' : 'current',
+        capped: duplicates > 0 || (!failure && totalCount !== null && offset < totalCount),
+        duplicates,
         failed: Boolean(failure),
         error: failure,
       };
@@ -542,10 +592,11 @@ export function createMelbourneCivicClient({
       sourceStatus: {
         status: partial ? 'partial' : 'current',
         capped: sourceCapped,
-        datasets: datasetResults.map(({ dataset, status, capped, failed, results }) => ({
+        datasets: datasetResults.map(({ dataset, status, capped, failed, results, duplicates }) => ({
           dataset,
           status: failed && results.length === 0 ? 'unavailable' : status,
           capped,
+          duplicates,
         })),
       },
     };

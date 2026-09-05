@@ -119,3 +119,24 @@
   failed, 1 expected Node-version allocation-benchmark skip; production build
   passed at 162 modules; `git diff --check` passed. Independent review remains
   pending; no push or deployment occurred.
+- Task 3 independent review failed with three P1, four P2 and one P3 finding:
+  indefinitely renewable inherited parking tables, first-match duplicate-bay
+  joins, false fresh all-stale parking status, civic request fan-out bypassing
+  the provider-request ceiling, address-bearing fields, absent JSON media-type
+  enforcement, unordered offset pagination and stale weekly cadence text.
+- Task 3 fix round 1/5 added RED-first regressions and resolved all eight
+  findings. Parking table success ages are immutable and expire at ten minutes;
+  duplicate joins select nearest sensor geometry then recency/stable tie;
+  current/stale counts drive honest aggregate status; one FIFO gate limits
+  actual GA, civic and existing regional fetch/read operations to four without
+  changing PTV; address-bearing fields are removed; JSON media types are
+  enforced; fixed live-validated ordering plus defensive deduplication makes
+  pagination honest; and fountains/barbecues now use Daily cadence with a
+  three-missed-cycle 72-hour last-good ceiling.
+- Fresh fix-round live smoke returned 245 fountains, 44 barbecues, 991 unique
+  development points, 319 culture points and 1,000 capped parking points (997
+  stale, 3 current). Focused Task 3/shared GA/PTV concurrency suites passed
+  110/110; full suite passed 2,832 with 0 failures and 1 expected Node-version
+  allocation-benchmark skip; production build passed at 162 modules;
+  `git diff --check` passed. Independent re-review remains pending; no push or
+  deployment occurred.

@@ -172,23 +172,30 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
   const cache = new Map();
   const inFlight = new Map();
   const transportClient = transportVicGtfs || createTransportVicGtfs({ fetchImpl, now, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
-  const civicClient = melbourneCivicClient || createMelbourneCivicClient({ fetchImpl, now, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
   let activeRefreshes = 0;
-  let activeGaRequests = 0;
-  const gaRequestWaiters = [];
+  let activeProviderRequests = 0;
+  const providerRequestWaiters = [];
 
-  async function withGaRequestSlot(operation) {
-    if (activeGaRequests >= MAX_CONCURRENT_UPSTREAM_REFRESHES) {
-      await new Promise((resolve) => gaRequestWaiters.push(resolve));
+  async function withProviderRequestSlot(operation) {
+    if (activeProviderRequests >= MAX_CONCURRENT_UPSTREAM_REFRESHES) {
+      await new Promise((resolve) => providerRequestWaiters.push(resolve));
+    } else {
+      activeProviderRequests += 1;
     }
-    activeGaRequests += 1;
     try {
       return await operation();
     } finally {
-      activeGaRequests -= 1;
-      gaRequestWaiters.shift()?.();
+      const next = providerRequestWaiters.shift();
+      if (next) next();
+      else activeProviderRequests -= 1;
     }
   }
+  const civicClient = melbourneCivicClient || createMelbourneCivicClient({
+    fetchImpl,
+    now,
+    withRequestSlot: withProviderRequestSlot,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
 
   async function refresh(sourceId, source, bbox) {
     if (MELBOURNE_CIVIC_SOURCE_IDS.has(sourceId)) {
@@ -202,7 +209,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         const payloads = [];
         try {
           for (let page = 0; page < MAX_GA_PAGES_PER_LAYER; page += 1) {
-            const payload = await withGaRequestSlot(async () => {
+            const payload = await withProviderRequestSlot(async () => {
               const controller = new AbortController();
               const timer = setTimeout(() => {
                 const error = new Error('timeout');
@@ -261,22 +268,24 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     }
     const transport = SOURCE_TRANSPORT[sourceId];
     if (!transport) throw new Error('source unavailable');
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      const error = new Error('timeout');
-      error.code = 'TIMEOUT';
-      controller.abort(error);
-    }, timeoutMs ?? transport.timeoutMs);
-    try {
-      const response = await fetchImpl(transport.url(bbox, source), {
-        method: 'GET', headers: { Accept: 'application/json' }, signal: controller.signal, redirect: 'error',
-      });
-      if (!response?.ok) throw new Error('upstream failed');
-      const payload = await readJsonCapped(response, MAX_RESPONSE_BYTES);
-      return normalizeRegionalFeatureCollection(sourceId, payload);
-    } finally {
-      clearTimeout(timer);
-    }
+    return withProviderRequestSlot(async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        const error = new Error('timeout');
+        error.code = 'TIMEOUT';
+        controller.abort(error);
+      }, timeoutMs ?? transport.timeoutMs);
+      try {
+        const response = await fetchImpl(transport.url(bbox, source), {
+          method: 'GET', headers: { Accept: 'application/json' }, signal: controller.signal, redirect: 'error',
+        });
+        if (!response?.ok) throw new Error('upstream failed');
+        const payload = await readJsonCapped(response, MAX_RESPONSE_BYTES);
+        return normalizeRegionalFeatureCollection(sourceId, payload);
+      } finally {
+        clearTimeout(timer);
+      }
+    });
   }
 
   return async function regionalProxy(req, res) {
