@@ -121,6 +121,34 @@ high provisional streaming ceiling instead of inventing four measured limits.
 - `git diff --check` and the staged diff check both passed.
 - Implementation commit: `3ffd43a` (`fix: harden Transport Victoria realtime transit`).
 
+## Independent review fix round 2/5
+
+The first re-review reproduced one remaining P1: a successful PTV refresh
+followed by sanitized HTTP 424 credential denial retained the prior browser
+layer cohort, kept stale vehicle positions rendered and returned success from
+`update()`.
+
+The new regression first proved that behavior RED (`true !== false`). The
+source-local fix now normalizes every HTTP 424 to `credentials-required` and
+deletes only the denied source from `lastGoodBySource` before rendering.
+Repeated denial cannot retain or resurrect the prior PTV cohort. Transient
+upstream failures and timeouts retain their existing bounded last-good
+fallback. A second regression mutation-check proved that replacing the
+source-local deletion with a global clear incorrectly removes an unrelated
+Victoria source cohort.
+
+Verification after the fix:
+
+- `node --test src/data/regionalLayer.test.mjs`: 15 passed, 0 failed.
+- focused Task 4 suite: 71 passed, 0 failed.
+- `npm test`: 2,773 passed, 0 failed, 1 skipped. The runner separately skipped
+  two allocation microbenchmarks because Node 26.8.1 was used instead of their
+  calibrated Node 24 runtime.
+- `npm run build`: passed with Vite 6.4.3; 160 modules transformed. The existing
+  large-chunk advisory was emitted.
+- `git diff --check`: passed.
+- Source/test commit: `8b4d73a` (`fix: clear stale transit after credential denial`).
+
 Fix-round committed files:
 
 - `.env.example`
