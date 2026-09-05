@@ -214,6 +214,59 @@ test('regional proxy continues after an empty ArcGIS transfer-limited page', asy
   assert.equal(JSON.parse(response.body).features[0].properties.title, 'Recovered Place');
 });
 
+test('regional proxy stops after a short transfer-limited final ArcGIS page as locally capped', async () => {
+  const offsets = [];
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      const offset = Number(new URL(input).searchParams.get('resultOffset'));
+      offsets.push(offset);
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: offset === 0
+          ? [gaPoint({ name: 'First Window Place', authority: 'VIC' }, 144.91)]
+          : [gaPoint({ name: 'Final Window Place', authority: 'VIC' }, 144.92)],
+        exceededTransferLimit: true,
+      });
+    },
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.deepEqual(offsets, [0, 500]);
+  const body = JSON.parse(response.body);
+  assert.deepEqual(body.features.map((feature) => feature.properties.title), [
+    'First Window Place', 'Final Window Place',
+  ]);
+  assert.equal(body.sourceStatus.status, 'partial');
+  assert.equal(body.sourceStatus.capped, true);
+  assert.equal(body.sourceStatus.layers[0].status, 'partial');
+  assert.equal(body.sourceStatus.layers[0].error, undefined);
+});
+
+test('regional proxy returns an empty partial result at the final ArcGIS page cap', async () => {
+  const offsets = [];
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      offsets.push(Number(new URL(input).searchParams.get('resultOffset')));
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: [],
+        exceededTransferLimit: true,
+      });
+    },
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.deepEqual(offsets, [0, 500]);
+  const body = JSON.parse(response.body);
+  assert.deepEqual(body.features, []);
+  assert.equal(body.sourceStatus.status, 'partial');
+  assert.equal(body.sourceStatus.capped, true);
+  assert.equal(body.sourceStatus.layers[0].status, 'partial');
+  assert.equal(body.sourceStatus.layers[0].error, undefined);
+});
+
 test('regional proxy retains page one when a later page of the same GA layer fails', async () => {
   const response = await invokeRegional(createRegionalProxy({
     fetchImpl: async (input) => {

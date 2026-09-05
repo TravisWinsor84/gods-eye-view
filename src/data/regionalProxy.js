@@ -220,6 +220,9 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
             if (featureCount >= source.maxFeatures) {
               return { layer: request.layer, payloads, truncated: true };
             }
+            if (page === MAX_GA_PAGES_PER_LAYER - 1) {
+              return { layer: request.layer, payloads, truncated: true };
+            }
             const nextOffset = request.offset + request.requestedCount;
             request = request.nextPage(nextOffset, source.maxFeatures - featureCount);
           }

@@ -175,3 +175,42 @@ passed
 
 Independent re-review remains pending. Browser-visible category-layer proof is
 still Task 6, and nothing has been pushed or deployed.
+
+## Independent-review fix round 3
+
+The second re-review found one remaining P2 at the local ArcGIS page-count
+boundary. After consuming the second permitted response, a continuing
+`exceededTransferLimit=true` flag still caused the proxy to construct a third
+request at offset 1,000. The fixed request builder correctly rejected that
+offset, but the paging catch path then mislabeled the local application cap as
+an upstream outage. Retained rows lost capped status, while two empty bounded
+pages became a false HTTP 502.
+
+Fix round 3 terminates the layer as locally truncated immediately after
+consuming the final permitted page and before constructing another request.
+Both short and empty final-page sequences now make exactly the bounded offsets
+`[0, 500]`, retain all available rows, return HTTP 200/degraded, and report the
+source as `partial`/`capped` with a partial layer and no upstream error.
+
+TDD RED was observed before the production change. The short-page regression
+returned retained rows but `capped: false`; the all-empty regression returned
+HTTP 502. Both tests passed after the single termination branch was added.
+
+Fresh round-three verification:
+
+```text
+node --test src/data/gaRegionalSources.test.mjs src/data/regionalSources.test.mjs src/data/regionalProxy.test.mjs src/data/dataCredits.test.mjs src/data/regionalLayer.test.mjs
+83 passed, 0 failed
+
+npm test
+2,804 passed, 0 failed, 1 expected Node-version allocation-benchmark skip
+
+npm run build
+passed; Vite transformed 161 modules
+
+git diff --check
+passed
+```
+
+Independent re-review remains pending. Browser-visible category-layer proof is
+still Task 6, and nothing has been pushed or deployed.

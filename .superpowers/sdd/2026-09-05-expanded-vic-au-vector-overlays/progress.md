@@ -82,3 +82,18 @@
   Node-version allocation-benchmark skip; production build passed at 161
   modules. Independent re-review remains pending; no push or deployment
   occurred.
+- Task 2 re-review 2 confirmed the requested-window correction and all four
+  earlier findings remain resolved, but found one P2 at the final local page
+  boundary: a transfer-limited second page attempted to construct offset 1,000
+  and converted the application cap into a false upstream failure.
+- Task 2 fix round 3/5 added RED-first short and empty final-page regressions.
+  The short sequence initially retained rows without capped status, while the
+  empty sequence returned a false 502. The proxy now stops after consuming the
+  second permitted page, before constructing a third request; both sequences
+  use exactly offsets `[0, 500]`, retain available rows, and return honest HTTP
+  200 degraded `partial`/`capped` status without an upstream error.
+- Fresh round-three verification: focused GA/source/proxy/credit/layer suites
+  passed 83/83; the full suite passed 2,804 with 0 failures and 1 expected
+  Node-version allocation-benchmark skip; production build passed at 161
+  modules; `git diff --check` passed. Independent re-review remains pending;
+  no push or deployment occurred.
