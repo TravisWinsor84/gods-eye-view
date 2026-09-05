@@ -42,6 +42,8 @@ test('registry declares the approved regional source IDs with immutable source c
     'vic-waste-facilities',
     'vic-property-boundaries',
     'ptv-transit',
+    'vic-road-unplanned',
+    'vic-lane-signals',
     'au-hospital-ed-performance',
   ]);
   assert.equal(Object.isFrozen(REGIONAL_SOURCES), true);
@@ -52,6 +54,10 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['vic-epa-air'].endpoint, null);
   assert.equal(REGIONAL_SOURCES['ptv-transit'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');
   assert.match(REGIONAL_SOURCES['ptv-transit'].endpoint, /opendata\.transport\.vic\.gov\.au\/dataset\/gtfs-realtime/);
+  assert.equal(REGIONAL_SOURCES['vic-road-unplanned'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');
+  assert.match(REGIONAL_SOURCES['vic-road-unplanned'].refresh, /context only/i);
+  assert.equal(REGIONAL_SOURCES['vic-lane-signals'].geometry, 'point');
+  assert.match(REGIONAL_SOURCES['vic-lane-signals'].refresh, /obey.*physical/i);
   assert.equal(REGIONAL_SOURCES['vic-cfa-alerts'].runtimeEligible, false);
   assert.equal(REGIONAL_SOURCES['au-emergency-facilities'].runtimeEligible, true);
   assert.equal(REGIONAL_SOURCES['au-health-facilities'].geometry, 'point');
@@ -116,6 +122,9 @@ test('reports regional source availability without exposing environment values',
     reason: 'Transport Victoria Open Data Portal key required',
   });
   assert.deepEqual(regionalSourceAvailability('ptv-transit', {
+    TRANSPORT_VIC_OPEN_DATA_API_KEY: ` ${secret} `,
+  }), { available: true, status: 'available', reason: '' });
+  assert.deepEqual(regionalSourceAvailability('vic-road-unplanned', {
     TRANSPORT_VIC_OPEN_DATA_API_KEY: ` ${secret} `,
   }), { available: true, status: 'available', reason: '' });
   assert.deepEqual(regionalSourceAvailability('ptv-transit', {

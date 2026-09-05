@@ -46,7 +46,7 @@ test('category packs assign every admitted source once by user-facing meaning', 
   ]);
   assert.deepEqual(createRegionalPackDefinitions({ transportVicConfigured: true })['regional-mobility'].sourceIds, [
     'melbourne-cycling', 'melbourne-parking-live', 'vic-transport-stops', 'vic-ev-chargers',
-    'ptv-transit',
+    'ptv-transit', 'vic-road-unplanned', 'vic-lane-signals',
   ]);
   assert.deepEqual(regionalPackIds('regional-environment'), [
     'melbourne-trees', 'melbourne-water-history', 'au-dea-hotspots', 'vic-parks',
@@ -86,6 +86,8 @@ test('regional packs contain runtime sources and omit registered sources until c
     'vic-fire-context',
     'vic-freight-network',
     'ptv-transit',
+    'vic-road-unplanned',
+    'vic-lane-signals',
   ]);
   assert.equal(regionalPackIds('regional-victoria').includes('vic-epa-air'), false);
   assert.equal(REGIONAL_SOURCES['ptv-transit'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');

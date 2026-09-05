@@ -1,6 +1,7 @@
 import { REGIONAL_SOURCES, normalizeRegionalFeatureCollection, regionalSourceAvailability } from './regionalSources.js';
 import { gaArcGisRequests } from './gaRegionalSources.js';
 import { createTransportVicGtfs } from './transportVicGtfs.js';
+import { createTransportVicRoads } from './transportVicRoads.js';
 import { createMelbourneCivicClient } from './melbourneCivicSources.js';
 import { OGC_MAX_RESPONSE_BYTES, normalizeOgcPayload, ogcFeatureRequest } from './ogcRegionalSources.js';
 import { createIndexedRegionalDownloads, INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS } from './indexedRegionalDownloads.js';
@@ -29,6 +30,7 @@ const OGC_SOURCE_IDS = new Set([
   'vic-epa-priority-sites', 'vic-landfill-register', 'vic-recreation-assets',
 ]);
 const INDEXED_SOURCE_IDS = new Set(INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS);
+const TRANSPORT_VIC_ROAD_SOURCE_IDS = new Set(['vic-road-unplanned', 'vic-lane-signals']);
 const OGC_TIMEOUT_MS = 20_000;
 const VICMAP_TIMEOUT_MS = 12_000;
 const MAX_GA_PAGES_PER_LAYER = 2;
@@ -191,7 +193,7 @@ function unavailableError(error) {
 }
 
 /** Create Vite middleware for the fixed, public regional-source allow-list. */
-export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, melbourneCivicClient, indexedRegionalDownloads, dataVicWasteFacilities, env = process.env } = {}) {
+export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, transportVicRoads, melbourneCivicClient, indexedRegionalDownloads, dataVicWasteFacilities, env = process.env } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   let activeRefreshes = 0;
@@ -213,6 +215,12 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     }
   }
   const transportClient = transportVicGtfs || createTransportVicGtfs({
+    fetchImpl,
+    now,
+    requestRunner: withProviderRequestSlot,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
+  const roadClient = transportVicRoads || createTransportVicRoads({
     fetchImpl,
     now,
     requestRunner: withProviderRequestSlot,
@@ -435,6 +443,30 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         return sendJson(res, error?.code === 'TIMEOUT' ? 504 : 502, {
           error: error?.code === 'TIMEOUT' ? 'regional source timed out' : 'regional source is temporarily unavailable',
         }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
+      }
+    }
+    if (TRANSPORT_VIC_ROAD_SOURCE_IDS.has(sourceId)) {
+      try {
+        const body = await roadClient.load(sourceId, { bbox, apiKey: serverApiKey, maxFeatures: source.maxFeatures });
+        const status = body?.sourceStatus?.status === 'stale' ? 'stale' : 'fresh';
+        const cache = cleanIndexedCacheHeader(body?.sourceStatus?.cache);
+        return sendJson(res, 200, body, {
+          'X-Regional-Source': sourceId,
+          'X-Regional-Status': status,
+          ...(cache ? { 'X-Regional-Cache': cache } : {}),
+        });
+      } catch (error) {
+        if (error?.code === 'CREDENTIALS_REQUIRED') {
+          return sendJson(res, 424, { error: 'regional source credentials required' }, {
+            'X-Regional-Source': sourceId, 'X-Regional-Status': 'credentials-required',
+          });
+        }
+        const timedOut = error?.code === 'TIMEOUT';
+        const rateLimited = error?.code === 'RATE_LIMITED';
+        return sendJson(res, timedOut ? 504 : rateLimited ? 429 : 502, {
+          error: timedOut ? 'regional source timed out' : rateLimited
+            ? 'regional source is rate limited' : 'regional source returned invalid data',
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': rateLimited ? 'rate-limited' : 'unavailable' });
       }
     }
     if (sourceId === 'vic-waste-facilities') {

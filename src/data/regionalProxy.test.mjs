@@ -1261,6 +1261,44 @@ test('regional proxy preserves an all-mode Transport Victoria timeout as sanitiz
   }
 });
 
+test('regional proxy serves authorized Transport Victoria road products through the server credential', async () => {
+  const calls = [];
+  const middleware = createRegionalProxy({
+    env: { TRANSPORT_VIC_OPEN_DATA_API_KEY: ' secret-value ' },
+    transportVicRoads: {
+      async load(sourceId, options) {
+        calls.push({ sourceId, options });
+        return {
+          type: 'FeatureCollection', features: [],
+          sourceStatus: { status: sourceId === 'vic-road-unplanned' ? 'current' : 'stale', cache: 'miss' },
+        };
+      },
+    },
+  });
+  const disruption = await invokeRegional(middleware, `/api/regional/vic-road-unplanned${MELBOURNE_BOUNDS}`);
+  const signals = await invokeRegional(middleware, `/api/regional/vic-lane-signals${MELBOURNE_BOUNDS}`);
+  assert.equal(disruption.status, 200);
+  assert.equal(disruption.headers['x-regional-status'], 'fresh');
+  assert.equal(signals.status, 200);
+  assert.equal(signals.headers['x-regional-status'], 'stale');
+  assert.deepEqual(calls, [
+    { sourceId: 'vic-road-unplanned', options: { apiKey: 'secret-value', bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 }, maxFeatures: 500 } },
+    { sourceId: 'vic-lane-signals', options: { apiKey: 'secret-value', bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 }, maxFeatures: 1_000 } },
+  ]);
+  assert.doesNotMatch(disruption.body + signals.body, /secret-value|KeyId|TRANSPORT_VIC/);
+});
+
+test('regional proxy sanitizes Transport Victoria road credential and provider failures', async () => {
+  for (const [code, status] of [['CREDENTIALS_REQUIRED', 424], ['TIMEOUT', 504], ['INVALID_PROVIDER_DATA', 502]]) {
+    const response = await invokeRegional(createRegionalProxy({
+      env: { TRANSPORT_VIC_OPEN_DATA_API_KEY: 'secret-value' },
+      transportVicRoads: { async load() { const error = new Error('secret-value leaked upstream'); error.code = code; throw error; } },
+    }), `/api/regional/vic-road-unplanned${MELBOURNE_BOUNDS}`);
+    assert.equal(response.status, status);
+    assert.doesNotMatch(response.body, /secret-value|leaked|upstream|KeyId/);
+  }
+});
+
 test('missing Google place context is a quiet keyless capability, not a 503', () => {
   assert.deepEqual(keylessGooglePlacesResponse(undefined), {
     statusCode: 200,

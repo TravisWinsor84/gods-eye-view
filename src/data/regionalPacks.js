@@ -20,7 +20,7 @@ export function createRegionalPackDefinitions({ transportVicConfigured = false }
     sourceIds: Object.freeze([
       'vic-fire-context',
       'vic-freight-network',
-      ...(transportVicConfigured ? ['ptv-transit'] : []),
+      ...(transportVicConfigured ? ['ptv-transit', 'vic-road-unplanned', 'vic-lane-signals'] : []),
     ]),
   }),
   'regional-australia': Object.freeze({
@@ -53,7 +53,7 @@ export function createRegionalPackDefinitions({ transportVicConfigured = false }
       'melbourne-parking-live',
       'vic-transport-stops',
       'vic-ev-chargers',
-      ...(transportVicConfigured ? ['ptv-transit'] : []),
+      ...(transportVicConfigured ? ['ptv-transit', 'vic-road-unplanned', 'vic-lane-signals'] : []),
     ]),
   }),
   'regional-environment': Object.freeze({
