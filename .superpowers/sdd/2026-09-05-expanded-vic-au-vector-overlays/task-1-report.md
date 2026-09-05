@@ -57,3 +57,8 @@ defects. `DATA_SOURCES.md` now distinguishes implemented regional sources from
 gated catalogue-only candidates, and the registered EPA follow-on plan defers
 the environment-variable name until the authenticated provider contract is
 known. No runtime code changed in this fix round.
+
+Re-review found one residual overstatement: runtime eligibility was described
+as if it guaranteed an implemented proxy and layer. The catalogue now separates
+implemented adapters, validated-but-unwired candidates such as AIHW, and
+runtime-ineligible records. No runtime code changed in fix round 2/5.

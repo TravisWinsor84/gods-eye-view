@@ -40,10 +40,12 @@ How to read this:
 
 ### Victorian and Australian regional catalogue
 
-This table contains both implemented regional sources and deliberately gated
-catalogue-only candidates. Runtime-eligible entries are served through the
-allow-listed regional proxy and category layers described below. Entries marked
-not runtime eligible have no browser fetch, request template, proxy transport or
+This table contains implemented regional sources, validated candidates that are
+not wired into a layer yet, and deliberately gated catalogue-only records. Each
+entry below states its actual integration status; runtime eligibility alone does
+not imply that a proxy route or category layer exists. Implemented adapters use
+the allow-listed regional proxy and packs described below. Entries marked not
+runtime eligible have no browser fetch, request template, proxy transport or
 pack membership. Any provider credential remains server-side and is documented
 only after its authenticated contract has been validated.
 
