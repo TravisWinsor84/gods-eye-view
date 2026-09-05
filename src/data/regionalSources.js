@@ -1,4 +1,8 @@
 import { GA_SOURCE_CREDITS, normalizeGaRegionalPayload } from './gaRegionalSources.js';
+import {
+  CITY_OF_MELBOURNE_CREDIT,
+  normalizeMelbourneCivicPayload,
+} from './melbourneCivicSources.js';
 
 const MAX_TEXT_LENGTH = 512;
 
@@ -146,6 +150,46 @@ export const REGIONAL_SOURCES = Object.freeze({
     licence: 'Geoscience Australia service attribution; compiled reference data',
     geometry: 'point', refreshMs: 604_800_000, refresh: 'weekly viewport query; compiled reference data',
     credit: GA_SOURCE_CREDITS['au-place-names'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'melbourne-drinking-fountains': Object.freeze({
+    name: 'Melbourne Drinking Fountains', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
+    endpoint: 'https://data.melbourne.vic.gov.au/explore/dataset/drinking-fountains/information/',
+    licence: 'Creative Commons Attribution 4.0 International', geometry: 'point', refreshMs: 21_600_000,
+    maxStaleMs: 604_800_000,
+    refresh: 'six-hour viewport cache; publisher source cadence is weekly', credit: CITY_OF_MELBOURNE_CREDIT,
+    credential: 'none', runtimeEligible: true, maxFeatures: 500,
+  }),
+  'melbourne-barbecues': Object.freeze({
+    name: 'Melbourne Public Barbecues', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
+    endpoint: 'https://data.melbourne.vic.gov.au/explore/dataset/public-barbecues/information/',
+    licence: 'Creative Commons Attribution 4.0 International', geometry: 'point', refreshMs: 21_600_000,
+    maxStaleMs: 604_800_000,
+    refresh: 'six-hour viewport cache; publisher source cadence is weekly', credit: CITY_OF_MELBOURNE_CREDIT,
+    credential: 'none', runtimeEligible: true, maxFeatures: 200,
+  }),
+  'melbourne-parking-live': Object.freeze({
+    name: 'Melbourne On-street Parking Sensors', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
+    endpoint: 'https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bay-sensors/information/',
+    licence: 'Creative Commons Attribution 4.0 International', geometry: 'point', refreshMs: 120_000,
+    maxStaleMs: 600_000,
+    refresh: 'provider-wide sensor and bay tables cached for two minutes; freshness is per sensor record',
+    credit: CITY_OF_MELBOURNE_CREDIT, credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'melbourne-development': Object.freeze({
+    name: 'Melbourne Development Activity', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
+    endpoint: 'https://data.melbourne.vic.gov.au/explore/dataset/development-activity-monitor/information/',
+    licence: 'Creative Commons Attribution 4.0 International', geometry: 'point', refreshMs: 86_400_000,
+    maxStaleMs: 2_592_000_000,
+    refresh: 'daily viewport cache; publisher source cadence is monthly', credit: CITY_OF_MELBOURNE_CREDIT,
+    credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'melbourne-culture': Object.freeze({
+    name: 'Melbourne Public Art and Memorials', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
+    endpoint: 'https://data.melbourne.vic.gov.au/explore/dataset/outdoor-artworks/information/',
+    licence: 'Creative Commons Attribution 4.0 International for dataset metadata; record-level media rights are separate',
+    geometry: 'point', refreshMs: 86_400_000, refresh: 'daily viewport cache; source inspection cadence is unspecified',
+    maxStaleMs: 2_592_000_000,
+    credit: CITY_OF_MELBOURNE_CREDIT, credential: 'none', runtimeEligible: true, maxFeatures: 500,
   }),
   'ptv-transit': Object.freeze({
     name: 'Transport Victoria Realtime Transit', source: 'Transport Victoria Open Data Portal', publisher: 'Public Transport Victoria',
@@ -458,6 +502,9 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   if (['melbourne-trees', 'melbourne-places'].includes(sourceId)) features = recordFeatures(sourceId, payload, source.maxFeatures);
   else if (['au-emergency-facilities', 'au-health-facilities', 'au-place-names'].includes(sourceId)) {
     return normalizeGaRegionalPayload(sourceId, payload);
+  }
+  else if (['melbourne-drinking-fountains', 'melbourne-barbecues', 'melbourne-parking-live', 'melbourne-development', 'melbourne-culture'].includes(sourceId)) {
+    return normalizeMelbourneCivicPayload(sourceId, payload, { maxFeatures: source.maxFeatures });
   }
   else if (sourceId === 'ptv-transit') features = ptvFeatures(payload, source.maxFeatures);
   else if (sourceId === 'au-hospital-ed-performance') features = aihwFeatures(source, payload);

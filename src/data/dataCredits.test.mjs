@@ -24,3 +24,12 @@ test('registers exact GA and incorporated G-NAF credits for regional reference s
   );
   assert.equal(byKey.get('au-place-names'), 'Geoscience Australia');
 });
+
+test('registers City of Melbourne Open Data attribution for civic overlays', () => {
+  const credit = DATA_CREDITS.find(({ key }) => key === 'city-of-melbourne-open-data');
+  assert.ok(credit);
+  assert.equal(
+    credit.html,
+    '<a href="https://data.melbourne.vic.gov.au/" target="_blank" rel="noopener">City of Melbourne Open Data</a> — licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">Creative Commons Attribution 4.0 International</a>.',
+  );
+});

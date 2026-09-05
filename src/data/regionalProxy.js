@@ -1,6 +1,7 @@
 import { REGIONAL_SOURCES, normalizeRegionalFeatureCollection, regionalSourceAvailability } from './regionalSources.js';
 import { gaArcGisRequests } from './gaRegionalSources.js';
 import { createTransportVicGtfs } from './transportVicGtfs.js';
+import { createMelbourneCivicClient } from './melbourneCivicSources.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -10,6 +11,13 @@ const MAX_BOUNDS_WIDTH = 10;
 const MAX_CONCURRENT_UPSTREAM_REFRESHES = 4;
 const ALLOWED_QUERY_KEYS = new Set(['west', 'south', 'east', 'north']);
 const GA_SOURCE_IDS = new Set(['au-emergency-facilities', 'au-health-facilities', 'au-place-names']);
+const MELBOURNE_CIVIC_SOURCE_IDS = new Set([
+  'melbourne-drinking-fountains',
+  'melbourne-barbecues',
+  'melbourne-parking-live',
+  'melbourne-development',
+  'melbourne-culture',
+]);
 const MAX_GA_PAGES_PER_LAYER = 2;
 const GA_TIMEOUT_MS = 20_000;
 const GA_GAZETTEER_TIMEOUT_MS = 30_000;
@@ -160,10 +168,11 @@ function unavailableError(error) {
 }
 
 /** Create Vite middleware for the fixed, public regional-source allow-list. */
-export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, env = process.env } = {}) {
+export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, melbourneCivicClient, env = process.env } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   const transportClient = transportVicGtfs || createTransportVicGtfs({ fetchImpl, now, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
+  const civicClient = melbourneCivicClient || createMelbourneCivicClient({ fetchImpl, now, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
   let activeRefreshes = 0;
   let activeGaRequests = 0;
   const gaRequestWaiters = [];
@@ -182,6 +191,9 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
   }
 
   async function refresh(sourceId, source, bbox) {
+    if (MELBOURNE_CIVIC_SOURCE_IDS.has(sourceId)) {
+      return civicClient.load(sourceId, { bbox, maxFeatures: source.maxFeatures });
+    }
     if (GA_SOURCE_IDS.has(sourceId)) {
       const initialRequests = gaArcGisRequests(sourceId, bbox, source.maxFeatures);
       const layerResults = await Promise.all(initialRequests.map(async (initialRequest) => {
@@ -306,6 +318,8 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
 
     const key = cacheKey(sourceId, bbox);
     const existing = cache.get(key);
+    const canServeLastGood = () => existing && (!Number.isFinite(source.maxStaleMs)
+      || now() - existing.cachedAt <= source.maxStaleMs);
     if (existing && now() - existing.cachedAt < source.refreshMs) {
       const sourceStatus = existing.body?.sourceStatus?.status;
       return sendJson(res, 200, existing.body, {
@@ -317,7 +331,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     let pending = inFlight.get(key);
     if (!pending) {
       if (activeRefreshes >= MAX_CONCURRENT_UPSTREAM_REFRESHES) {
-        if (existing) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
+        if (canServeLastGood()) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
         return sendJson(res, 503, { error: 'regional source is temporarily unavailable' }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'saturated' });
       }
       activeRefreshes += 1;
@@ -341,7 +355,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         'X-Regional-Cache': 'MISS',
       });
     } catch (error) {
-      if (existing) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
+      if (canServeLastGood()) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
       if (error?.code === 'RESPONSE_TOO_LARGE') return sendJson(res, 502, { error: 'regional source response was too large' });
       if (error?.code === 'INVALID_JSON' || error?.code === 'INVALID_GA_RESPONSE' || error?.message === 'source unavailable') return sendJson(res, 502, { error: 'regional source returned invalid data' });
       // Normalizer errors are intentionally collapsed with malformed payloads.

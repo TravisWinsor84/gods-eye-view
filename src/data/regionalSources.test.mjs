@@ -22,6 +22,11 @@ test('registry declares the approved regional source IDs with immutable source c
     'au-emergency-facilities',
     'au-health-facilities',
     'au-place-names',
+    'melbourne-drinking-fountains',
+    'melbourne-barbecues',
+    'melbourne-parking-live',
+    'melbourne-development',
+    'melbourne-culture',
     'ptv-transit',
     'au-hospital-ed-performance',
   ]);
@@ -37,6 +42,9 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['au-emergency-facilities'].runtimeEligible, true);
   assert.equal(REGIONAL_SOURCES['au-health-facilities'].geometry, 'point');
   assert.equal(REGIONAL_SOURCES['au-place-names'].credential, 'none');
+  assert.equal(REGIONAL_SOURCES['melbourne-parking-live'].refreshMs, 120_000);
+  assert.equal(REGIONAL_SOURCES['melbourne-parking-live'].maxStaleMs, 600_000);
+  assert.equal(REGIONAL_SOURCES['melbourne-culture'].geometry, 'point');
   assert.ok(Number.isInteger(REGIONAL_SOURCES['melbourne-trees'].maxFeatures));
 });
 
@@ -376,5 +384,6 @@ test('attribution is exact, source-scoped, and rejects unknown IDs', () => {
   assert.match(regionalSourceAttribution('au-emergency-facilities'), /Commonwealth of Australia \(Geoscience Australia\) 2023/);
   assert.match(regionalSourceAttribution('au-health-facilities'), /G-NAF © Geoscape Australia/);
   assert.equal(regionalSourceAttribution('au-place-names'), 'Geoscience Australia');
+  assert.equal(regionalSourceAttribution('melbourne-parking-live'), 'City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.');
   assert.throws(() => regionalSourceAttribution('nope'), /Unknown regional source: nope/);
 });

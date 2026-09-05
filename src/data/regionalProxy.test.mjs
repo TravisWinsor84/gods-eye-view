@@ -103,6 +103,56 @@ test('regional proxy builds a fixed official route from only the approved source
   assert.doesNotMatch(requestedUrl, /attacker|secret/);
 });
 
+test('regional proxy delegates Melbourne civic sources with only validated source, bounds and caps', async () => {
+  const calls = [];
+  const response = await invokeRegional(createRegionalProxy({
+    melbourneCivicClient: {
+      async load(sourceId, options) {
+        calls.push({ sourceId, ...options });
+        return {
+          type: 'FeatureCollection',
+          features: [],
+          sourceStatus: { status: 'partial', datasets: [{ dataset: 'drinking-fountains', status: 'partial' }] },
+        };
+      },
+    },
+  }), `/api/regional/melbourne-drinking-fountains${MELBOURNE_BOUNDS}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.deepEqual(calls, [{
+    sourceId: 'melbourne-drinking-fountains',
+    bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 },
+    maxFeatures: 500,
+  }]);
+});
+
+test('Melbourne civic last-good data expires at the source-specific stale ceiling', async () => {
+  let clock = 1_000_000;
+  let fail = false;
+  const middleware = createRegionalProxy({
+    now: () => clock,
+    melbourneCivicClient: {
+      async load() {
+        if (fail) throw new Error('provider details must not escape');
+        return { type: 'FeatureCollection', features: [], sourceStatus: { status: 'current' } };
+      },
+    },
+  });
+  const url = `/api/regional/melbourne-parking-live${MELBOURNE_BOUNDS}`;
+  assert.equal((await invokeRegional(middleware, url)).status, 200);
+  fail = true;
+  clock += 120_001;
+  const briefStale = await invokeRegional(middleware, url);
+  assert.equal(briefStale.status, 200);
+  assert.equal(briefStale.headers['x-regional-cache'], 'STALE');
+
+  clock = 1_600_001;
+  const expired = await invokeRegional(middleware, url);
+  assert.equal(expired.status, 502);
+  assert.deepEqual(JSON.parse(expired.body), { error: 'regional source is temporarily unavailable' });
+  assert.doesNotMatch(expired.body, /provider details/);
+});
+
 test('regional proxy queries every fixed GA emergency sublayer and returns sanitized reference features', async () => {
   const requested = [];
   const response = await invokeRegional(createRegionalProxy({

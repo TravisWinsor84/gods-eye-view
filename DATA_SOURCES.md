@@ -63,6 +63,11 @@ only after its authenticated contract has been validated.
 | `au-emergency-facilities` | Geoscience Australia, [Emergency Management Facilities ArcGIS service](https://services.ga.gov.au/gis/rest/services/Emergency_Management_Facilities/MapServer) | Creative Commons Attribution 4.0 International; incorporates G-NAF under the G-NAF End User Licence Agreement | `© Commonwealth of Australia (Geoscience Australia) 2023. This material is released under the Creative Commons Attribution 4.0 International Licence. Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.` | Point | Implemented registry, sanitizer and daily viewport proxy; not assigned to a visible category pack until Task 6 |
 | `au-health-facilities` | Geoscience Australia / Healthdirect, [National HealthDirect Health Facilities ArcGIS service](https://services.ga.gov.au/gis/rest/services/National_HealthDirect_Health_Facilities/MapServer) | The live service states Creative Commons Attribution 4.0 International and incorporated G-NAF terms; the Data.gov catalogue licence remains unspecified | `© Commonwealth of Australia (Geoscience Australia) 2025`<br>`This material is released under the Creative Commons Attribution 4.0 International Licence.`<br><br>`Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.` | Point | Implemented registry, sanitizer and daily viewport proxy; periodic reference directory, not assigned to a visible category pack until Task 6 |
 | `au-place-names` | Geoscience Australia, [Composite Gazetteer of Australia ArcGIS service](https://services.ga.gov.au/gis/rest/services/Composite_Gazetteer_of_Australia/MapServer) | Service attribution: Geoscience Australia; compiled reference data | `Geoscience Australia` | Point | Implemented registry, sanitizer and weekly viewport proxy; not assigned to a visible category pack until Task 6 |
+| `melbourne-drinking-fountains` | City of Melbourne, [Drinking Fountains](https://data.melbourne.vic.gov.au/explore/dataset/drinking-fountains/information/) through Explore API v2.1 | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented six-hour viewport cache; publisher source cadence is weekly; inventory only and not assigned to a visible category pack until Task 6 |
+| `melbourne-barbecues` | City of Melbourne, [Public Barbecues](https://data.melbourne.vic.gov.au/explore/dataset/public-barbecues/information/) through Explore API v2.1 | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented six-hour viewport cache; publisher source cadence is weekly; inventory only and not assigned to a visible category pack until Task 6 |
+| `melbourne-parking-live` | City of Melbourne, [On-street Parking Bay Sensors](https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bay-sensors/information/) joined to [On-street Parking Bays](https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bays/information/) through Explore API v2.1 JSON exports | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented provider-wide two-minute cache; bbox filtering follows the server-side join; each observation becomes stale after five minutes; not assigned to a visible category pack until Task 6 |
+| `melbourne-development` | City of Melbourne, [Development Activity Monitor](https://data.melbourne.vic.gov.au/explore/dataset/development-activity-monitor/information/) through Explore API v2.1 | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented daily viewport cache for a monthly planning/development source; not live works and not assigned to a visible category pack until Task 6 |
+| `melbourne-culture` | City of Melbourne, [Outdoor Artworks](https://data.melbourne.vic.gov.au/explore/dataset/outdoor-artworks/information/) and [Public Memorials and Sculptures](https://data.melbourne.vic.gov.au/explore/dataset/public-memorials-and-sculptures/information/) through Explore API v2.1 | Dataset metadata is [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/); media rights remain record-specific | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented daily viewport cache; reference metadata with unspecified inspection cadence; not assigned to a visible category pack until Task 6 |
 | `ptv-transit` | Public Transport Victoria, [Transport Victoria Open Data Portal GTFS Realtime](https://opendata.transport.vic.gov.au/dataset/gtfs-realtime) | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/); one Open Data Portal key is required server-side | `Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.` | Point (vehicle positions) | Metro, tram, bus and V/Line provider snapshots cached globally by mode for at least 30 seconds; bbox filtering occurs after decode |
 | `au-hospital-ed-performance` | Australian Institute of Health and Welfare, [MyHospitals API](https://www.aihw.gov.au/hospitals/other-resources/myhospitals-api) | [CC BY 4.0](https://www.aihw.gov.au/copyright); no credentials | `Based on Australian Institute of Health and Welfare material.` | Point (hospital reporting units) | 24-hour application cache; release-cycle historical data |
 
@@ -86,6 +91,34 @@ IDs, authority IDs, comments, contacts and full street addresses. Partial
 sublayer failures are returned as degraded source status without exposing
 provider errors. These routes are implemented but are not visible in a category
 layer or pack until the explicit Task 6 integration.
+
+The five Melbourne civic sources use fixed City of Melbourne Explore API v2.1
+requests and strict public-field allow-lists. Fountains and barbecues omit asset,
+contractor, manager, maintenance, model and full location-description fields;
+their presence does not guarantee current operability. Development records omit
+development/property/application identifiers and full street addresses and are
+labelled monthly context rather than live works or permit advice. Cultural
+records retain only bounded title, type, date, locality and short description;
+asset/service-manager fields, long histories, inscriptions and record imagery
+are not exposed.
+
+Parking is the only provider-wide Melbourne civic source. The server makes two
+fixed JSON export requests per refresh (sensor observations and non-null joined
+bay geometry), with one request per table, a 4 MiB per-table ceiling, a 32 MiB
+aggregate ceiling, and hard row ceilings of 8,000 sensors and 32,000 bays. The
+two tables are downloaded and coalesced once per two minutes, joined by
+`kerbsideid`, indexed in process, and bbox-filtered only after the join. Provider
+identifiers are not returned. Each record preserves its exact `lastupdated`,
+`status_timestamp` and bay publication date and is independently stale after
+five minutes. A failed refresh can retain source-local last-good parking tables
+for at most ten minutes; the inventory sources use explicit seven- or thirty-day
+ceilings appropriate to their publication cadence. `Present` and `Unoccupied`
+are sensor observations only: network
+delay, public holidays, construction and changed restrictions can make them
+misleading, so the UI must never promise availability or legality and users
+must check current street signs. Missing geometry, table or dataset failures,
+byte or row caps, and retained last-good tables are surfaced as partial, stale
+or unavailable status rather than silently presented as complete.
 
 `vic-epa-air` is deliberately fail-closed. The previously recorded URL was an
 information page, not a supported API endpoint, and the guessed gateway route

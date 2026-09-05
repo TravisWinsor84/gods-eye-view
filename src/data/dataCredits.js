@@ -162,6 +162,12 @@ export const DATA_CREDITS = [
     key: 'au-place-names',
     html: GA_SOURCE_CREDITS['au-place-names'],
   },
+  {
+    key: 'city-of-melbourne-open-data',
+    html:
+      '<a href="https://data.melbourne.vic.gov.au/" target="_blank" rel="noopener">City of Melbourne Open Data</a> — licensed under ' +
+      '<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">Creative Commons Attribution 4.0 International</a>.',
+  },
   // ── Bundled snapshots ───────────────────────────────────────────
   {
     key: 'datacenters',
