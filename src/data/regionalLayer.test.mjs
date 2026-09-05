@@ -234,7 +234,7 @@ test('uses one clustered CustomDataSource and only the regional proxy route', as
 
   assert.equal(added.length, 1);
   assert.ok(added[0] instanceof Cesium.CustomDataSource);
-  assert.equal(added[0].clustering.enabled, true);
+  assert.equal(added[0].clustering.enabled, false);
   assert.equal(added[0].entities.values.length, 1);
   assert.equal(urls.length, 1);
   assert.match(urls[0], /^\/api\/regional\/melbourne-trees\?/);

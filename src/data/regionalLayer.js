@@ -554,9 +554,9 @@ export function createRegionalLayer({
       if (destroyed || dataSource) return !destroyed;
       const created = new Cesium.CustomDataSource(id);
       created.show = false;
-      created.clustering.enabled = true;
-      created.clustering.pixelRange = 48;
-      created.clustering.minimumClusterSize = 3;
+      // Cluster primitives carry arrays of IDs, which Cesium's standard pick
+      // cannot resolve to an individual feature. Keep bounded points selectable.
+      created.clustering.enabled = false;
       await viewer.dataSources.add(created);
       if (destroyed) {
         viewer.dataSources.remove(created, true);
