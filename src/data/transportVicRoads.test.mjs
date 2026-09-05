@@ -75,6 +75,17 @@ test('unplanned feed pages once per provider cache and bbox-filters afterwards',
   assert.equal(second.sourceStatus.cache, 'hit');
 });
 
+test('bbox filtering retains a disruption line that crosses the viewport between outside vertices', async () => {
+  const crossing = unplannedFeature('crossing');
+  crossing.geometry.coordinates = [[144.7, -37.85], [145.2, -37.85]];
+  const client = createTransportVicRoads({ fetchImpl: async () => jsonResponse({
+    meta: { page: 1, limit: 100, count: 1, total_pages: 1, total_records: 1 },
+    data: { type: 'FeatureCollection', features: [crossing] },
+  }) });
+  const result = await client.load('vic-road-unplanned', { bbox: BBOX_A, apiKey: 'secret', maxFeatures: 50 });
+  assert.deepEqual(result.features.map(({ id }) => id), ['crossing']);
+});
+
 test('lane sites page provider-wide and never turn display values into driving advice', async () => {
   const calls = [];
   const row = (id, longitude) => ({ type: 'Feature', id, geometry: { type: 'Point', coordinates: [longitude, -37.81] }, properties: { name: id, state: 'OK', lanes: [{ num: 1, value: '80' }] } });

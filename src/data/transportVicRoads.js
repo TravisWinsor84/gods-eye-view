@@ -105,17 +105,38 @@ export function normalizeLaneSignal(input) {
 }
 
 function intersectsBbox(feature, bbox) {
-  let intersects = false;
-  const visit = (value) => {
-    if (intersects || !Array.isArray(value)) return;
-    if (validPosition(value)) {
-      intersects = value[0] >= bbox.west && value[0] <= bbox.east && value[1] >= bbox.south && value[1] <= bbox.north;
-      return;
+  const coordinates = feature?.geometry?.coordinates;
+  if (validPosition(coordinates)) {
+    return coordinates[0] >= bbox.west && coordinates[0] <= bbox.east
+      && coordinates[1] >= bbox.south && coordinates[1] <= bbox.north;
+  }
+  if (!Array.isArray(coordinates)) return false;
+  const inside = ([x, y]) => x >= bbox.west && x <= bbox.east && y >= bbox.south && y <= bbox.north;
+  const segmentIntersects = ([x1, y1], [x2, y2]) => {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const p = [-dx, dx, -dy, dy];
+    const q = [x1 - bbox.west, bbox.east - x1, y1 - bbox.south, bbox.north - y1];
+    let start = 0;
+    let end = 1;
+    for (let index = 0; index < p.length; index += 1) {
+      if (p[index] === 0) {
+        if (q[index] < 0) return false;
+        continue;
+      }
+      const ratio = q[index] / p[index];
+      if (p[index] < 0) start = Math.max(start, ratio);
+      else end = Math.min(end, ratio);
+      if (start > end) return false;
     }
-    for (const nested of value) visit(nested);
+    return true;
   };
-  visit(feature?.geometry?.coordinates);
-  return intersects;
+  for (let index = 0; index < coordinates.length; index += 1) {
+    if (!validPosition(coordinates[index])) return false;
+    if (inside(coordinates[index])) return true;
+    if (index > 0 && segmentIntersects(coordinates[index - 1], coordinates[index])) return true;
+  }
+  return false;
 }
 
 async function readJsonCapped(response, maxBytes) {
