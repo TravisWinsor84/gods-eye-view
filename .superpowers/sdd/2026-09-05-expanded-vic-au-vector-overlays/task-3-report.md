@@ -50,9 +50,13 @@ two fixed v2.1 `exports/json` downloads for the provider-wide parking tables.
   bay `lastupdated`. `Present` and `Unoccupied` become observation labels only;
   no `available` property or legality claim is emitted.
 - Rows without joined bay geometry are omitted. Provider row keys are used only
-  for server-side joins, stable paging and true-row deduplication. They are never
-  returned or copied reversibly; public feature IDs contain bounded one-way
-  digests, with deterministic collision handling.
+  for server-side joins, stable paging, true-row deduplication and internal
+  ordering of records whose public projections are identical. They are never
+  returned or included in a public-ID digest. Public feature-ID bases digest
+  only the fixed source/dataset name, normalized returned properties and point
+  coordinates. Identical public projections are internally sorted by opaque
+  source key and receive stable ordinal suffixes (`-2`, `-3`, and so on); the
+  suffix is not a hash or other transform of that key.
 - Fountains/barbecues omit asset, contract, manager, maintenance, model and
   full location-description fields. Development omits development/property/
   application IDs and full addresses. Culture keeps only bounded public
@@ -76,7 +80,7 @@ Melbourne bbox: west `144.9`, south `-37.9`, east `145`, north `-37.8`.
 | Public barbecues | 44 | current | 1 bounded record page |
 | Parking sensors/bays | 1,000 | partial/capped | 2 provider-wide exports |
 | Development activity | 1,000 | partial/capped | 10 bounded record pages |
-| Culture | 319 | current | 4 bounded record pages across 2 datasets |
+| Culture | 319 | current | 3 bounded artwork record pages + 1 memorial export |
 
 The parking downloads contained 6,324 sensors and 5,072 bays with non-null
 join keys. The sampled/capped Melbourne response had maximum
@@ -98,8 +102,8 @@ separate gates.
 
 ## Independent-review fixes — current contract
 
-The two fix rounds resolve the findings from `task-3-review.md` and
-`task-3-rereview-1.md`:
+The three fix rounds resolve the findings from `task-3-review.md`,
+`task-3-rereview-1.md`, and `task-3-rereview-2.md`:
 
 - each parking table now carries its immutable `lastSuccessfulAt`; a successful
   sibling refresh cannot renew an inherited failed table, and either table is
@@ -120,11 +124,12 @@ The two fix rounds resolve the findings from `task-3-review.md` and
   variant. Wrong media types are rejected before body parsing or caching;
 - every offset-paginated spatial dataset uses a live-validated fixed unique
   `order_by`. Internal `assetid`, `development_key`, and `asset_id` fields are
-  selected only for stable internal identity and are never normalized or
-  emitted. True repeated source rows deduplicate by those keys while distinct
-  same-site development rows survive. Public memorials use the bounded cached
-  export/index path described above. The privacy and cadence contracts are
-  stated once in Runtime boundaries above.
+  selected only for stable internal identity and are never normalized,
+  emitted, or hashed into public IDs. True repeated source rows deduplicate by
+  those keys while distinct same-site development rows survive. Public
+  memorials use the single bounded cached export/index path described above.
+  The privacy and cadence contracts are stated once in Runtime boundaries
+  above.
 
 ### Fresh live smoke — 2026-09-05
 
@@ -163,6 +168,27 @@ was performed. Independent re-review remains the next gate.
 - Live safe smoke: 1,000 development features (`partial`/capped, zero duplicate
   source keys), 319 culture features (`current`), and two distinct `Painted
   Poles` records with distinct public IDs.
+
+No pack membership, push, deployment, account, credential or provider mutation
+was performed. Independent re-review remains the next gate.
+
+### Fresh verification after fix round 3
+
+- RED-first regressions reproduced the enumerable opaque-key public IDs and
+  key-derived collision IDs before the implementation changed.
+- Public feature-ID bases now derive only from normalized public properties,
+  coordinates and fixed source/dataset names. Opaque keys remain internal to
+  deduplication and ordering; identical public projections receive stable
+  ordinal suffixes after opaque-key sorting.
+- The current culture retrieval contract is three bounded outdoor-artwork
+  record pages plus one bounded, cached provider-wide memorial JSON export.
+- Focused Task 3 plus shared proxy/GA/PTV concurrency suites: 116 passed, 0
+  failed.
+- Full `npm test`: 2,838 passed, 0 failed, 1 expected skip. The skipped
+  allocation microbenchmarks remain calibrated for Node 24; verification ran
+  on Node 26.8.1.
+- `npm run build`: passed; Vite transformed 162 modules.
+- `git diff --check`: passed.
 
 No pack membership, push, deployment, account, credential or provider mutation
 was performed. Independent re-review remains the next gate.

@@ -6,6 +6,7 @@ import {
   CITY_OF_MELBOURNE_CREDIT,
   createMelbourneCivicClient,
   melbourneCivicSpatialRequests,
+  normalizeMelbourneCivicPayload,
   normalizeMelbourneCivicRecord,
   normalizeMelbourneParking,
   queryMelbourneParkingIndex,
@@ -184,6 +185,46 @@ test('development omits identifiers and full address and remains monthly context
   assert.match(feature.properties.caveat, /not live works/i);
   assert.doesNotMatch(JSON.stringify(feature), /X000557|100435|100436|Anderson|TP-123/);
   assert.match(feature.id, /^melbourne-development-[a-f0-9]{24}$/);
+});
+
+test('development public IDs cannot identify an opaque provider key by enumeration', () => {
+  const publicRecord = {
+    status: 'COMPLETED', year_completed: '2024', clue_small_area: 'West Melbourne (Residential)',
+    floors_above: 5, resi_dwellings: 31, hotel_rooms: 0,
+    geopoint: { lon: 144.9415, lat: -37.8047 },
+  };
+  const observedId = normalizeMelbourneCivicRecord('melbourne-development', {
+    ...publicRecord, development_key: 'X000557',
+  }, { dataset: 'development-activity-monitor' }).id;
+  const enumeratedIds = new Set(Array.from({ length: 10_000 }, (_, candidate) => (
+    normalizeMelbourneCivicRecord('melbourne-development', {
+      ...publicRecord, development_key: `X${String(candidate).padStart(6, '0')}`,
+    }, { dataset: 'development-activity-monitor' }).id
+  )));
+
+  assert.deepEqual([...enumeratedIds], [observedId], 'opaque-key candidates cannot select or recover a public ID');
+  assert.doesNotMatch(observedId, /X000557/);
+});
+
+test('identical public development records use stable ordinal IDs while true source duplicates deduplicate', () => {
+  const shared = {
+    status: 'COMPLETED', year_completed: '2024', clue_small_area: 'Melbourne',
+    floors_above: 5, resi_dwellings: 31, hotel_rooms: 0,
+    geopoint: { lon: 144.95, lat: -37.85 },
+  };
+  const lowerKey = { ...shared, development_key: 'X000010' };
+  const higherKey = { ...shared, development_key: 'X000020' };
+  const normalize = (results) => normalizeMelbourneCivicPayload('melbourne-development', [{
+    dataset: 'development-activity-monitor', results,
+  }], { maxFeatures: 10 });
+
+  const forward = normalize([higherKey, lowerKey, higherKey]);
+  const reverse = normalize([higherKey, lowerKey, higherKey].reverse());
+  assert.equal(forward.features.length, 2);
+  assert.deepEqual(forward.features.map(({ id }) => id), reverse.features.map(({ id }) => id));
+  assert.match(forward.features[0].id, /^melbourne-development-[a-f0-9]{24}$/);
+  assert.equal(forward.features[1].id, `${forward.features[0].id}-2`);
+  assert.doesNotMatch(JSON.stringify(forward), /X000010|X000020|development_key/);
 });
 
 test('development deduplicates repeated opaque source rows but preserves distinct same-site records', async () => {

@@ -163,3 +163,15 @@
   319 current culture rows, and both distinct `Painted Poles` records with
   distinct generated IDs. No push or deployment occurred; independent
   re-review remains pending.
+- Task 3 re-review 2 confirmed the PTV semaphore, memorial completeness and all
+  original runtime fixes, but found an enumerable provider-key transform in
+  public feature IDs and a stale memorial-pagination statement in the report.
+- Task 3 fix round 3/5 adds RED-first regressions for a 10,000-candidate opaque
+  key enumeration, stable identical-public-record ordinals, same-site survival
+  and true-source-row deduplication. Public ID bases now digest only normalized
+  returned properties, point coordinates and fixed source/dataset names;
+  provider keys remain internal to deduplication and collision-group ordering
+  and are never emitted or hashed. The report now states the one current
+  memorial export contract. Focused tests passed 116/116; full `npm test`
+  passed 2,838 with 0 failures and 1 expected Node-version skip; production
+  build passed at 162 modules; `git diff --check` passed.

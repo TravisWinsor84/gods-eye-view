@@ -122,15 +122,15 @@ function sourceRowIdentity(sourceId, dataset, row, coordinates) {
   return `${dataset}|fallback|${canonicalValue(row)}|${coordinates.join(',')}`;
 }
 
-function featureId(sourceId, dataset, row, coordinates) {
-  const internalIdentity = sourceRowIdentity(sourceId, dataset, row, coordinates);
-  return `${sourceId}-${boundedDigest(`${sourceId}|${internalIdentity}`)}`;
+function featureId(sourceId, dataset, coordinates, properties) {
+  const publicProjection = canonicalValue({ coordinates, properties });
+  return `${sourceId}-${boundedDigest(`${sourceId}|${dataset}|${publicProjection}`)}`;
 }
 
-function feature(sourceId, dataset, row, coordinates, properties) {
+function feature(sourceId, dataset, coordinates, properties) {
   return {
     type: 'Feature',
-    id: featureId(sourceId, dataset, row, coordinates),
+    id: featureId(sourceId, dataset, coordinates, properties),
     geometry: { type: 'Point', coordinates },
     properties,
   };
@@ -359,7 +359,7 @@ function assetRecord(sourceId, row, dataset) {
     freshnessClass: 'inventory',
     caveat: 'Asset inventory only; presence does not guarantee current condition or operability.',
   };
-  return feature(sourceId, dataset, row, coordinates, properties);
+  return feature(sourceId, dataset, coordinates, properties);
 }
 
 function developmentRecord(row, dataset) {
@@ -377,7 +377,7 @@ function developmentRecord(row, dataset) {
     freshnessClass: 'monthly-context',
     caveat: 'Monthly planning and development context only; not live works, a permit decision, or legal advice.',
   };
-  return feature('melbourne-development', dataset, row, coordinates, properties);
+  return feature('melbourne-development', dataset, coordinates, properties);
 }
 
 function cultureRecord(row, dataset) {
@@ -392,7 +392,7 @@ function cultureRecord(row, dataset) {
     freshnessClass: 'reference',
     caveat: 'Reference metadata only; current condition and record-level media rights are not implied.',
   };
-  return feature('melbourne-culture', dataset, row, coordinates, properties);
+  return feature('melbourne-culture', dataset, coordinates, properties);
 }
 
 export function normalizeMelbourneCivicRecord(sourceId, row, { dataset } = {}) {
@@ -414,9 +414,8 @@ export function normalizeMelbourneCivicPayload(sourceId, payload, { nowMs = Date
     return queryMelbourneParkingIndex(index, bbox, { nowMs, maxFeatures });
   }
   const datasets = Array.isArray(payload) ? payload : [{ dataset: SPATIAL_DATASETS[sourceId]?.[0]?.dataset, results: payload?.results }];
-  const features = [];
+  const groups = new Map();
   const identities = new Set();
-  const publicIdOwners = new Map();
   for (const item of datasets) {
     if (!Array.isArray(item?.results)) throw new Error(`${sourceId} payload must contain results arrays`);
     for (const row of item.results) {
@@ -425,19 +424,19 @@ export function normalizeMelbourneCivicPayload(sourceId, payload, { nowMs = Date
         const identity = sourceRowIdentity(sourceId, item.dataset, row, normalized.geometry.coordinates);
         if (identities.has(identity)) continue;
         identities.add(identity);
-        const originalId = normalized.id;
-        let candidateId = originalId;
-        let collision = 0;
-        while (publicIdOwners.has(candidateId) && publicIdOwners.get(candidateId) !== identity) {
-          collision += 1;
-          candidateId = `${originalId}-${boundedDigest(`collision|${collision}|${identity}`).slice(0, 8)}`;
-        }
-        normalized.id = candidateId;
-        publicIdOwners.set(candidateId, identity);
-        features.push(normalized);
+        if (!groups.has(normalized.id)) groups.set(normalized.id, []);
+        groups.get(normalized.id).push({ identity, normalized });
       }
-      if (features.length >= maxFeatures) return { type: 'FeatureCollection', features };
     }
+  }
+  const features = [];
+  for (const [baseId, entries] of groups) {
+    entries.sort((left, right) => left.identity.localeCompare(right.identity));
+    for (let index = 0; index < entries.length && features.length < maxFeatures; index += 1) {
+      entries[index].normalized.id = index === 0 ? baseId : `${baseId}-${index + 1}`;
+      features.push(entries[index].normalized);
+    }
+    if (features.length >= maxFeatures) break;
   }
   return { type: 'FeatureCollection', features };
 }
