@@ -213,6 +213,11 @@ export class DataLayerManager {
       // subsequent enable arms a SECOND interval → 2× poll → OpenSky 429 (M1).
       toggleChain: Promise.resolve(),
     });
+    layerModule.setStatsListener?.(() => {
+      if (!this.layers.has(layerModule.id)) return;
+      this._refreshTogglePanel();
+      this._notifyListeners({ type: 'source-refresh', layerId: layerModule.id });
+    });
   }
 
   /** Seal registration and prove each production layer has one share disposition. */
@@ -1922,6 +1927,9 @@ export class DataLayerManager {
         name: entry.module.name,
         icon: entry.module.icon,
         source: entry.module.source,
+        description: entry.module.description,
+        group: entry.module.group,
+        color: entry.module.color,
         showInTogglePanel: entry.module.showInTogglePanel !== false,
         enabled: entry.enabled,
         lifecycleState: entry.lifecycleState,
@@ -2022,8 +2030,47 @@ export class DataLayerManager {
     if (!this._toggleContainer) return;
     this._toggleContainer.innerHTML = '';
 
-    for (const layer of this.getAll()) {
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'data-layer-search';
+    search.placeholder = 'Find a layer…';
+    search.setAttribute('aria-label', 'Find a data layer');
+    search.addEventListener('input', () => {
+      const query = search.value.trim().toLowerCase();
+      for (const row of this._toggleContainer.querySelectorAll('.data-toggle-row')) {
+        row.hidden = !row.textContent.toLowerCase().includes(query);
+      }
+      for (const heading of this._toggleContainer.querySelectorAll('.data-layer-group')) {
+        let sibling = heading.nextElementSibling;
+        let visible = false;
+        while (sibling && !sibling.classList.contains('data-layer-group')) {
+          if (!sibling.hidden) visible = true;
+          sibling = sibling.nextElementSibling;
+        }
+        heading.hidden = !visible;
+      }
+    });
+    this._toggleContainer.appendChild(search);
+    let currentGroup = null;
+
+    const groupOrder = ['Global layers', 'Civic services', 'Mobility', 'Environment', 'Places & planning'];
+    const panelLayers = this.getAll().sort((a, b) => {
+      const rank = (layer) => {
+        const index = groupOrder.indexOf(layer.group || 'Global layers');
+        return index < 0 ? groupOrder.length : index;
+      };
+      return rank(a) - rank(b);
+    });
+    for (const layer of panelLayers) {
       if (!layer.showInTogglePanel) continue;
+      const group = layer.group || 'Global layers';
+      if (group !== currentGroup) {
+        const heading = document.createElement('h3');
+        heading.className = 'data-layer-group';
+        heading.textContent = group;
+        this._toggleContainer.appendChild(heading);
+        currentGroup = group;
+      }
       const row = document.createElement('div');
       row.className = 'data-toggle-row';
       row.dataset.layerId = layer.id;
@@ -2033,7 +2080,15 @@ export class DataLayerManager {
 
       const left = document.createElement('div');
       left.className = 'data-toggle-left';
-      left.innerHTML = `<span class="data-icon">${layer.icon}</span><span class="data-name">${layer.name}</span>`;
+      const icon = document.createElement('span');
+      icon.className = 'data-icon';
+      icon.textContent = layer.icon;
+      if (layer.color) icon.style.color = layer.color;
+      const name = document.createElement('span');
+      name.className = 'data-name';
+      name.textContent = layer.name;
+      left.appendChild(icon);
+      left.appendChild(name);
 
       const right = document.createElement('div');
       right.className = 'data-toggle-right';
@@ -2066,6 +2121,12 @@ export class DataLayerManager {
       bottomRow.textContent = this._buildMetaText(layer);
 
       row.appendChild(topRow);
+      if (layer.description) {
+        const description = document.createElement('div');
+        description.className = 'data-layer-description';
+        description.textContent = layer.description;
+        row.appendChild(description);
+      }
       row.appendChild(bottomRow);
 
       // Optional per-layer sub-controls (chips + color legend). The click
@@ -2219,6 +2280,7 @@ export class DataLayerManager {
     if (layer.lifecycleUncertain) {
       return `UNCERTAIN · ${source} · lifecycle state requires reconciliation`;
     }
+    if (!layer.enabled && layer.description) return `${source} · Enable to load this layer`;
     const presentedError = stats.error || stats.lastError || stats.managerRefreshError;
     if (presentedError) {
       if (typeof stats.retryInSec === 'number' && stats.retryInSec > 0) {
@@ -2246,7 +2308,8 @@ export class DataLayerManager {
       return `${stateLabel} · ${source} · ${ago}${retry}`;
     }
     if (typeof stats.loadingLabel === 'string' && stats.loadingLabel.trim()) {
-      return `${source} · ${stats.loadingLabel.trim()}`;
+      const checked = layer.description && stats.lastUpdate ? ` · Checked ${ago}` : '';
+      return `${source}${checked} · ${stats.loadingLabel.trim()}`;
     }
     return `${source} · ${ago}`;
   }

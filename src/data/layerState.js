@@ -1,3 +1,144 @@
+// Legacy definitions stay data-only so state migration never imports rendering modules.
+export function createRegionalPackDefinitions({ transportVicConfigured = false, wetlandsConfigured = false } = {}) {
+  return Object.freeze({
+  'regional-melbourne': Object.freeze({
+    name: 'Melbourne Data',
+    icon: 'M',
+    color: '#62d9ff',
+    sourceIds: Object.freeze([
+      'melbourne-trees',
+      'melbourne-places',
+      'melbourne-cycling',
+      'melbourne-water-history',
+    ]),
+  }),
+  'regional-victoria': Object.freeze({
+    name: 'Victoria Data',
+    icon: 'V',
+    color: '#ff9f43',
+    sourceIds: Object.freeze([
+      'vic-fire-context',
+      'vic-freight-network',
+      ...(transportVicConfigured ? ['ptv-transit', 'vic-road-unplanned', 'vic-lane-signals'] : []),
+    ]),
+  }),
+  'regional-australia': Object.freeze({
+    name: 'Australia Data',
+    icon: 'A',
+    color: '#5f8dff',
+    sourceIds: Object.freeze(['au-hydrology']),
+  }),
+  'regional-civic': Object.freeze({
+    name: 'Civic Services',
+    icon: 'C',
+    color: '#55d6be',
+    sourceIds: Object.freeze([
+      'au-emergency-facilities',
+      'au-health-facilities',
+      'au-public-toilets',
+      'melbourne-places',
+      'melbourne-drinking-fountains',
+      'melbourne-barbecues',
+      'vic-waste-facilities',
+      'au-hospital-ed-performance',
+    ]),
+  }),
+  'regional-mobility': Object.freeze({
+    name: 'Mobility',
+    icon: 'T',
+    color: '#ffd166',
+    sourceIds: Object.freeze([
+      'melbourne-cycling',
+      'melbourne-parking-live',
+      'vic-transport-stops',
+      'vic-ev-chargers',
+      ...(transportVicConfigured ? ['ptv-transit', 'vic-road-unplanned', 'vic-lane-signals'] : []),
+    ]),
+  }),
+  'regional-environment': Object.freeze({
+    name: 'Environment',
+    icon: 'E',
+    color: '#74d680',
+    sourceIds: Object.freeze([
+      'melbourne-trees',
+      'melbourne-water-history',
+      'au-dea-hotspots',
+      'vic-parks',
+      'vic-recreation-tracks',
+      'vic-renewable-facilities',
+      'vic-flood-history-2022',
+      'vic-epa-priority-sites',
+      'vic-landfill-register',
+      'vic-recreation-assets',
+      'vic-epa-air',
+      ...(wetlandsConfigured ? ['vic-wetlands-2025'] : []),
+    ]),
+  }),
+  'regional-planning': Object.freeze({
+    name: 'Places & Planning',
+    icon: 'P',
+    color: '#b69cff',
+    sourceIds: Object.freeze([
+      'au-place-names',
+      'vic-heritage',
+      'melbourne-development',
+      'melbourne-culture',
+      'vic-property-boundaries',
+    ]),
+  }),
+  });
+}
+
+const transportVicConfigured = import.meta.env?.VITE_TRANSPORT_VIC_OPEN_DATA_CONFIGURED === 'true';
+const wetlandsConfigured = import.meta.env?.VITE_VIC_WETLANDS_2025_CONFIGURED === 'true';
+export const REGIONAL_PACKS = createRegionalPackDefinitions({ transportVicConfigured, wetlandsConfigured });
+
+
+// Durable wire assignments: never renumber or reuse a retired source token.
+export const REGIONAL_SOURCE_LAYER_TOKENS = Object.freeze({
+  'regional-source-melbourne-trees': 'r01',
+  'regional-source-melbourne-places': 'r02',
+  'regional-source-melbourne-cycling': 'r03',
+  'regional-source-melbourne-water-history': 'r04',
+  'regional-source-vic-fire-context': 'r05',
+  'regional-source-vic-freight-network': 'r06',
+  'regional-source-au-hydrology': 'r07',
+  'regional-source-au-emergency-facilities': 'r08',
+  'regional-source-au-health-facilities': 'r09',
+  'regional-source-au-public-toilets': 'r10',
+  'regional-source-melbourne-drinking-fountains': 'r11',
+  'regional-source-melbourne-barbecues': 'r12',
+  'regional-source-vic-waste-facilities': 'r13',
+  'regional-source-au-hospital-ed-performance': 'r14',
+  'regional-source-melbourne-parking-live': 'r15',
+  'regional-source-vic-transport-stops': 'r16',
+  'regional-source-vic-ev-chargers': 'r17',
+  'regional-source-au-dea-hotspots': 'r18',
+  'regional-source-vic-parks': 'r19',
+  'regional-source-vic-recreation-tracks': 'r20',
+  'regional-source-vic-renewable-facilities': 'r21',
+  'regional-source-vic-flood-history-2022': 'r22',
+  'regional-source-vic-epa-priority-sites': 'r23',
+  'regional-source-vic-landfill-register': 'r24',
+  'regional-source-vic-recreation-assets': 'r25',
+  'regional-source-vic-epa-air': 'r26',
+  'regional-source-au-place-names': 'r27',
+  'regional-source-vic-heritage': 'r28',
+  'regional-source-melbourne-development': 'r29',
+  'regional-source-melbourne-culture': 'r30',
+  'regional-source-vic-property-boundaries': 'r31',
+  'regional-source-ptv-transit': 'r32',
+  'regional-source-vic-road-unplanned': 'r33',
+  'regional-source-vic-lane-signals': 'r34',
+  'regional-source-vic-wetlands-2025': 'r35',
+});
+
+const LEGACY_REGIONAL_TOKENS = Object.freeze({
+  h: 'regional-australia', l: 'regional-civic', n: 'regional-environment',
+  j: 'regional-melbourne', o: 'regional-mobility', p: 'regional-planning',
+  k: 'regional-victoria',
+});
+
 const VALID_DISPOSITIONS = new Set([
   'enabled-only',
   'enabled+options',
@@ -18,11 +159,11 @@ const PENDING_TRACKING_POLL_MS = 1_000;
 const TRACKING_ID_GRAMMAR = /^[0-9a-z~_-]{1,16}$/;
 /**
  * Ceilings for the untrusted v2 layer fields. Both are far above any legitimate
- * payload (16 one-character tokens; a dozen short option assignments), so a
+ * payload (single-character core and three-character source tokens), so a
  * value past them is malformed or hostile. Reject the WHOLE payload, matching
  * the unknown-token rule — never salvage a prefix.
  */
-const MAX_ENABLED_LAYERS_CHARS = 64;
+const MAX_ENABLED_LAYERS_CHARS = 512;
 const MAX_LAYER_OPTIONS_CHARS = 512;
 export const LAYER_STATE_STORAGE_KEY = 'gev:layer-state:v2';
 export const LAYER_RESTORE_ORIGINS = Object.freeze({
@@ -288,13 +429,8 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'military-awareness', token: 'g', disposition: 'enabled-only' }),
   Object.freeze({ id: 'military-installations', token: 'i', disposition: 'enabled-only' }),
   Object.freeze({ id: 'radio', token: 'r', disposition: 'enabled+options', optionOwner: 'radio' }),
-  Object.freeze({ id: 'regional-australia', token: 'h', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'regional-civic', token: 'l', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'regional-environment', token: 'n', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'regional-melbourne', token: 'j', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'regional-mobility', token: 'o', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'regional-planning', token: 'p', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'regional-victoria', token: 'k', disposition: 'enabled-only' }),
+  ...Object.entries(REGIONAL_SOURCE_LAYER_TOKENS).sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, token]) => Object.freeze({ id, token, disposition: 'enabled-only' })),
   Object.freeze({ id: 'rocket-launches', token: 'x', disposition: 'enabled-only' }),
   Object.freeze({ id: 'satellites', token: 's', disposition: 'enabled+options', optionOwner: 'satellites' }),
   Object.freeze({ id: 'telegeography-submarine-cables', token: 'u', disposition: 'enabled-only' }),
@@ -344,7 +480,10 @@ export function validateLayerStateRegistry(registry = LAYER_STATE_REGISTRY) {
     if (!/^[a-z0-9-]+$/.test(entry.id)) throw new Error(`Invalid layer-state id: ${entry.id}`);
     if (ids.has(entry.id)) throw new Error(`Duplicate layer-state id: ${entry.id}`);
     ids.add(entry.id);
-    if (!/^[a-z0-9]$/.test(entry.token || '')) throw new Error(`Invalid layer-state token: ${entry.id}`);
+    if (!/^(?:[a-z0-9]|r[0-9]{2})$/.test(entry.token || '')
+      || Object.hasOwn(LEGACY_REGIONAL_TOKENS, entry.token)) {
+      throw new Error(`Invalid layer-state token: ${entry.id}`);
+    }
     if (tokens.has(entry.token)) throw new Error(`Duplicate layer-state token: ${entry.token}`);
     tokens.add(entry.token);
     if (!VALID_DISPOSITIONS.has(entry.disposition)) {
@@ -381,6 +520,15 @@ export function normalizeLayerState(candidate) {
   const requestedEnabled = new Set(
     Array.isArray(input.enabledLayerIds) ? input.enabledLayerIds.map(String) : [],
   );
+  // Consume legacy bundles once. Their union becomes ordinary independent
+  // selections, so switching any source off cannot be undone by a hidden pack.
+  for (const id of [...requestedEnabled]) {
+    if (!Object.hasOwn(REGIONAL_PACKS, id)) continue;
+    requestedEnabled.delete(id);
+    for (const sourceId of REGIONAL_PACKS[id].sourceIds) {
+      requestedEnabled.add(`regional-source-${sourceId}`);
+    }
+  }
   const enabledLayerIds = REGISTERED_LAYER_IDS.filter((id) => requestedEnabled.has(id));
   const enabled = new Set(enabledLayerIds);
   const options = Object.fromEntries(OPTION_OWNER_IDS.map((ownerId) => [
@@ -461,8 +609,11 @@ export function decodeLayerStateParams(params) {
   // `l=` is the one valid explicit-empty representation. Any non-empty token
   // set containing an unknown member rejects the complete layer payload so a
   // typo or future token cannot silently become an authoritative empty set.
-  if (layerTokens.some((token) => !REGISTRY_BY_TOKEN.has(token))) return null;
-  const enabledLayerIds = layerTokens.map((token) => REGISTRY_BY_TOKEN.get(token).id);
+  if (layerTokens.some((token) => !REGISTRY_BY_TOKEN.has(token)
+    && !Object.hasOwn(LEGACY_REGIONAL_TOKENS, token))) return null;
+  const enabledLayerIds = layerTokens.map((token) => (
+    REGISTRY_BY_TOKEN.get(token)?.id || LEGACY_REGIONAL_TOKENS[token]
+  ));
   const rawOptions = {};
   for (const assignment of rawOptionsField.split('_')) {
     if (!assignment) continue;

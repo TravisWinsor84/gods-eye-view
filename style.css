@@ -4479,6 +4479,31 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(255, 255, 255, 0.03);
 }
 
+.data-layer-search {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--text-dim, #637888);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text-primary);
+  font: 13px var(--font-sans);
+}
+.data-layer-search:focus-visible { outline: 2px solid #62d9ff; outline-offset: 2px; }
+.data-layer-group {
+  margin: 16px 10px 5px;
+  color: var(--text-secondary);
+  font: 600 12px var(--font-sans);
+}
+.data-layer-description {
+  margin: 5px 0;
+  color: var(--text-secondary);
+  font: 12px/1.45 var(--font-sans);
+}
+.data-toggle-left { min-width: 0; }
+.data-toggle-right { flex-shrink: 0; }
+.data-toggle-row[hidden], .data-layer-group[hidden] { display: none; }
+
 /* Selected-only, provenance-first proximity results. This is intentionally a
    contextual panel, not a radar/engagement display. */
 #global-context-panel {
@@ -9714,6 +9739,7 @@ body.scene-playback-mode #key-setup {
 .map-context-source-error { color: #e4c58f; }
 
 .map-context-source-row[data-status="stale"],
+.map-context-source-row[data-status="degraded"],
 .map-context-source-row[data-status="unavailable"],
 .map-context-source-row[data-status="credentials-required"] {
   border-left-color: #d5a863;

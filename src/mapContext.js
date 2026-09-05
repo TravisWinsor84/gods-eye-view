@@ -55,7 +55,7 @@ function sourceStatus(source) {
   const stated = normalizeText(source?.status).toLowerCase();
   if (source?.available === false || stated === 'error') return 'unavailable';
   if (stated === 'ok' || stated === 'fresh' || stated === 'active') return 'current';
-  return ['current', 'partial', 'stale', 'unavailable', 'credentials-required', 'zoom-required', 'pending', 'idle'].includes(stated)
+  return ['current', 'partial', 'degraded', 'stale', 'unavailable', 'credentials-required', 'zoom-required', 'pending', 'idle'].includes(stated)
     ? stated
     : 'current';
 }
@@ -168,10 +168,12 @@ export function buildMapContext({
   if (sourceDescriptions.length > 2) {
     summaryParts.push(`${sourceDescriptions.length} sources`);
     const staleCount = normalizedSources.filter((source) => source.status === 'stale').length;
+    const degradedCount = normalizedSources.filter((source) => source.status === 'degraded').length;
     const unavailableCount = normalizedSources.filter((source) => (
       source.status === 'unavailable' || source.status === 'credentials-required'
     )).length;
     if (staleCount) summaryParts.push(`${staleCount} stale`);
+    if (degradedCount) summaryParts.push(`${degradedCount} degraded`);
     if (unavailableCount) summaryParts.push(`${unavailableCount} unavailable`);
   } else if (sourceDescriptions.length) {
     summaryParts.push(sourceDescriptions.join('; '));

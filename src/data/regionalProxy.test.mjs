@@ -12,7 +12,39 @@ import createViteConfig, {
   validMilitaryInstallationBox,
   validRegionalPoint,
 } from '../../vite.config.js';
-import { createRegionalProxy } from './regionalProxy.js';
+import { createRegionalProxy, regionalHealthStatus } from './regionalProxy.js';
+
+test('coverage caps cannot mask failed cohorts, malformed rows or stale observations', () => {
+  assert.equal(regionalHealthStatus({ status: 'partial', capped: true }), 'partial');
+  assert.equal(regionalHealthStatus({ status: 'partial', truncated: true }), 'partial');
+  assert.equal(regionalHealthStatus({ status: 'partial', capped: true, layers: [{ status: 'partial', error: 'upstream-unavailable' }] }), 'degraded');
+  assert.equal(regionalHealthStatus({ status: 'partial', capped: true, invalidRows: 1 }), 'degraded');
+  assert.equal(regionalHealthStatus({ status: 'partial', capped: true, datasets: [{ status: 'stale' }] }), 'stale');
+  assert.equal(regionalHealthStatus({ status: 'partial', staleRecords: 1, currentRecords: 3 }), 'stale');
+});
+
+test('City result totals distinguish caps, short partial pages and complete results on MISS and HIT', async () => {
+  for (const [total, expected, capped] of [[1001, 'partial', true], [1000, 'fresh', false], [101, 'partial', false], [1, 'fresh', false]]) {
+    const middleware = createRegionalProxy({
+      fetchImpl: async (input) => {
+        const offset = Number(new URL(input).searchParams.get('offset'));
+        const results = total >= 1000 ? Array.from({ length: 100 }, (_, index) => ({
+          ...regionalTreePayload().results[0], com_id: `tree-${offset + index}`,
+        })) : regionalTreePayload().results;
+        return regionalResponseJson({ results, total_count: total });
+      },
+    });
+    for (const cache of ['MISS', 'HIT']) {
+      const result = await invokeRegional(middleware, `/api/regional/melbourne-trees${MELBOURNE_BOUNDS}`);
+      assert.equal(result.headers['x-regional-status'], expected);
+      assert.equal(result.headers['x-regional-cache'], cache);
+      const detail = JSON.parse(result.body).sourceStatus;
+      assert.equal(detail.numberMatched, total);
+      assert.equal(detail.returnedRecords, total >= 1000 ? 1000 : 1);
+      assert.equal(detail.capped, capped);
+    }
+  }
+});
 
 function regionalResponseJson(value, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -141,7 +173,7 @@ test('regional proxy delegates the fixed DataVic waste snapshot and reports its 
   }]);
   assert.equal(response.status, 200);
   assert.equal(response.headers['x-regional-cache'], 'HIT');
-  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.equal(response.headers['x-regional-status'], 'partial');
   assert.equal(JSON.parse(response.body).sourceStatus.snapshot, 'October 2025');
 });
 
@@ -266,7 +298,7 @@ test('regional proxy reports malformed Vicmap geometry as source-scoped invalid 
 
 test('regional proxy maps indexed partial, stale, limit, invalid and unavailable states honestly', async () => {
   const states = [
-    [{ sourceStatus: { status: 'partial', cache: 'miss' } }, 200, 'degraded', 'MISS'],
+    [{ sourceStatus: { status: 'partial', cache: 'miss' } }, 200, 'partial', 'MISS'],
     [{ sourceStatus: { status: 'stale', cache: 'stale' } }, 200, 'stale', 'STALE'],
     [Object.assign(new Error('source limit exceeded'), { code: 'SOURCE_LIMIT' }), 502, 'unavailable', undefined],
     [Object.assign(new Error('invalid source data'), { code: 'INVALID_SOURCE_DATA' }), 502, 'unavailable', undefined],
@@ -400,7 +432,7 @@ test('regional proxy delegates Melbourne civic sources with only validated sourc
     },
   }), `/api/regional/melbourne-drinking-fountains${MELBOURNE_BOUNDS}`);
   assert.equal(response.status, 200);
-  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.equal(response.headers['x-regional-status'], 'partial');
   assert.deepEqual(calls, [{
     sourceId: 'melbourne-drinking-fountains',
     bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 },
@@ -650,7 +682,7 @@ test('regional proxy serves OGC last-good only inside the source-specific stale 
   assert.doesNotMatch(expired.body, /private provider failure/);
 });
 
-test('regional proxy maps all-stale civic observations to a degraded header', async () => {
+test('regional proxy maps all-stale civic observations to a stale header', async () => {
   const response = await invokeRegional(createRegionalProxy({
     melbourneCivicClient: {
       async load() {
@@ -659,7 +691,7 @@ test('regional proxy maps all-stale civic observations to a degraded header', as
     },
   }), `/api/regional/melbourne-parking-live${MELBOURNE_BOUNDS}`);
   assert.equal(response.status, 200);
-  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.equal(response.headers['x-regional-status'], 'stale');
 });
 
 test('Melbourne civic last-good data expires at the source-specific stale ceiling', async () => {
@@ -817,7 +849,7 @@ test('regional proxy stops after a short transfer-limited final ArcGIS page as l
   }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.equal(response.headers['x-regional-status'], 'partial');
   assert.deepEqual(offsets, [0, 500]);
   const body = JSON.parse(response.body);
   assert.deepEqual(body.features.map((feature) => feature.properties.title), [
@@ -843,7 +875,7 @@ test('regional proxy returns an empty partial result at the final ArcGIS page ca
   }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.equal(response.headers['x-regional-status'], 'partial');
   assert.deepEqual(offsets, [0, 500]);
   const body = JSON.parse(response.body);
   assert.deepEqual(body.features, []);
@@ -880,7 +912,7 @@ test('regional proxy retains page one when a later page of the same GA layer fai
   assert.doesNotMatch(response.body, /secret page two failure/);
 });
 
-test('regional proxy reports a source-wide multi-layer cap as degraded', async () => {
+test('regional proxy reports a source-wide multi-layer cap as partial coverage', async () => {
   const response = await invokeRegional(createRegionalProxy({
     fetchImpl: async (input) => {
       const layer = Number(new URL(input).pathname.match(/MapServer\/(\d+)\/query$/)?.[1]);
@@ -895,7 +927,7 @@ test('regional proxy reports a source-wide multi-layer cap as degraded', async (
   }), `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`);
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.equal(response.headers['x-regional-status'], 'partial');
   const body = JSON.parse(response.body);
   assert.equal(body.sourceStatus.status, 'partial');
   assert.equal(body.sourceStatus.capped, true);

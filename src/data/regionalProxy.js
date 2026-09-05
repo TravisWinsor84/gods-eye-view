@@ -12,6 +12,20 @@ import { createAihwHospitalEd } from './aihwHospitalEd.js';
 import { createTransportVicFreight } from './transportVicFreight.js';
 
 const MAX_CACHE_ENTRIES = 64;
+
+// Coverage limits describe the result, not provider availability. Inspect
+// child cohorts too: a capped result must not hide a failed sublayer.
+export function regionalHealthStatus(detail = {}) {
+  const children = ['layers', 'datasets', 'tables'].flatMap((key) => Object.values(detail[key] || {}));
+  const childStates = children.map(regionalHealthStatus);
+  if (['unavailable', 'degraded', 'error', 'invalid-data'].includes(detail.status)
+    || detail.error || Number(detail.invalidFeatures) > 0 || Number(detail.invalidRows) > 0
+    || childStates.includes('degraded')) return 'degraded';
+  if (detail.status === 'stale' || Number(detail.staleRecords) > 0 || childStates.includes('stale')) return 'stale';
+  if (['zoom-required', 'outside-coverage'].includes(detail.status)) return detail.status;
+  if (detail.capped || detail.truncated || ['partial', 'capped'].includes(detail.status) || childStates.includes('partial')) return 'partial';
+  return !detail.status || detail.status === 'current' ? 'fresh' : 'degraded';
+}
 const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_BOUNDS_WIDTH = 10;
 // A process-local cap limits all distinct source/bbox refreshes. Same-key
@@ -328,7 +342,16 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         if (payload.results.length < CITY_RECORD_PAGE_SIZE) break;
         offset += payload.results.length;
       }
-      return normalizeRegionalFeatureCollection(sourceId, { total_count: totalCount, results });
+      const body = normalizeRegionalFeatureCollection(sourceId, { total_count: totalCount, results });
+      const partial = results.length < totalCount;
+      const capped = partial && results.length >= source.maxFeatures;
+      return {
+        ...body,
+        sourceStatus: {
+          status: partial ? 'partial' : 'current', capped,
+          numberMatched: totalCount, returnedRecords: results.length,
+        },
+      };
     }
     if (GA_SOURCE_IDS.has(sourceId)) {
       const initialRequests = gaArcGisRequests(sourceId, bbox, source.maxFeatures);
@@ -505,7 +528,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     if (TRANSPORT_VIC_ROAD_SOURCE_IDS.has(sourceId)) {
       try {
         const body = await roadClient.load(sourceId, { bbox, apiKey: serverApiKey, maxFeatures: source.maxFeatures });
-        const status = body?.sourceStatus?.status === 'stale' ? 'stale' : 'fresh';
+        const status = regionalHealthStatus(body?.sourceStatus);
         const cache = cleanIndexedCacheHeader(body?.sourceStatus?.cache);
         return sendJson(res, 200, body, {
           'X-Regional-Source': sourceId,
@@ -543,9 +566,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
       try {
         const body = await wasteClient.load({ bbox, maxFeatures: source.maxFeatures });
         const sourceStatus = body?.sourceStatus || {};
-        const status = sourceStatus.status === 'stale'
-          ? 'stale'
-          : sourceStatus.status === 'current' ? 'fresh' : 'degraded';
+        const status = regionalHealthStatus(sourceStatus);
         const cache = cleanIndexedCacheHeader(sourceStatus.cache);
         return sendJson(res, 200, body, {
           'X-Regional-Source': sourceId,
@@ -595,9 +616,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
       try {
         const body = await indexedClient.load(sourceId, { bbox, maxFeatures: source.maxFeatures });
         const sourceStatus = body?.sourceStatus || {};
-        const status = sourceStatus.status === 'stale'
-          ? 'stale'
-          : sourceStatus.status === 'current' ? 'fresh' : 'degraded';
+        const status = regionalHealthStatus(sourceStatus);
         const cache = cleanIndexedCacheHeader(sourceStatus.cache);
         return sendJson(res, 200, body, {
           'X-Regional-Source': sourceId,
@@ -620,11 +639,9 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     const canServeLastGood = () => existing && (!Number.isFinite(source.maxStaleMs)
       || now() - existing.cachedAt <= source.maxStaleMs);
     if (existing && now() - existing.cachedAt < source.refreshMs) {
-      const sourceStatus = existing.body?.sourceStatus?.status;
       return sendJson(res, 200, existing.body, {
         'X-Regional-Source': sourceId,
-        'X-Regional-Status': isVicmap && sourceStatus === 'zoom-required'
-          ? 'zoom-required' : sourceStatus && sourceStatus !== 'current' ? 'degraded' : 'fresh',
+        'X-Regional-Status': regionalHealthStatus(existing.body?.sourceStatus),
         'X-Regional-Cache': 'HIT',
       });
     }
@@ -648,11 +665,9 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     }
     try {
       const body = await pending;
-      const sourceStatus = body?.sourceStatus?.status;
       return sendJson(res, 200, body, {
         'X-Regional-Source': sourceId,
-        'X-Regional-Status': isVicmap && sourceStatus === 'zoom-required'
-          ? 'zoom-required' : sourceStatus && sourceStatus !== 'current' ? 'degraded' : 'fresh',
+        'X-Regional-Status': regionalHealthStatus(body?.sourceStatus),
         'X-Regional-Cache': 'MISS',
       });
     } catch (error) {

@@ -160,3 +160,22 @@ test('context never invents a freshness class without timestamp or cadence evide
   assert.equal(context.sources[0].freshnessClass, null);
   assert.equal(context.sources[0].ageMs, null);
 });
+
+test('context preserves degraded regional health instead of presenting it as current', () => {
+  const source = {
+    sourceId: 'ptv-transit', name: 'Transit', status: 'degraded',
+    error: 'regional source is temporarily unavailable',
+  };
+  const context = buildMapContext({ sources: [source] });
+  assert.equal(context.sources[0].status, 'degraded');
+  assert.equal(context.sources[0].error, source.error);
+  assert.match(context.sourceSummary, /Transit · degraded/);
+  assert.doesNotMatch(context.sourceSummary, /current/);
+
+  const multiple = buildMapContext({ sources: [source,
+    { name: 'Capped inventory', status: 'partial' },
+    { name: 'Healthy inventory', status: 'fresh' },
+  ] });
+  assert.deepEqual(multiple.sources.map(({ status }) => status), ['degraded', 'partial', 'current']);
+  assert.match(multiple.sourceSummary, /3 sources · 1 degraded/);
+});

@@ -7055,6 +7055,7 @@ const _weatherEffectsInFlight = new Map();
 const _weatherEffectsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 45, globalMax: 120 });
 let _nominatimQueue = Promise.resolve();
 let _nominatimLastRequestAt = 0;
+let _nominatimPending = 0;
 
 export function requiredFiniteQueryNumber(params, key) {
   const value = params.get(key);
@@ -7158,7 +7159,9 @@ function normalizeRssArticles(xml, limit = 5) {
   return articles;
 }
 
-function fetchRegionalPlace(point) {
+function fetchRegionalPlace(point, { zoom = 10, preferSuburb = false } = {}) {
+  if (_nominatimPending >= 8) return Promise.reject(new Error('Place lookup queue is full'));
+  _nominatimPending += 1;
   const task = _nominatimQueue.then(async () => {
     const waitMs = Math.max(0, 1100 - (Date.now() - _nominatimLastRequestAt));
     if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -7167,7 +7170,7 @@ function fetchRegionalPlace(point) {
       format: 'jsonv2',
       lat: point.latitude.toFixed(5),
       lon: point.longitude.toFixed(5),
-      zoom: '10',
+      zoom: String(zoom),
       addressdetails: '1',
       'accept-language': 'en',
     });
@@ -7177,10 +7180,60 @@ function fetchRegionalPlace(point) {
         Referer: 'https://github.com/bilawalsidhu/gods-eye-view',
       },
     });
+    if (preferSuburb && payload?.address) {
+      const suburb = payload.address.suburb || payload.address.neighbourhood || payload.address.quarter;
+      if (suburb) return normalizeRegionalPlace({ ...payload, address: { ...payload.address, city: suburb } });
+    }
     return normalizeRegionalPlace(payload);
   });
-  _nominatimQueue = task.catch(() => null);
+  _nominatimQueue = task.catch(() => null).finally(() => { _nominatimPending -= 1; });
   return task;
+}
+
+/** Small automatic map-place route; shares the paced Nominatim queue only. */
+export function regionalPlaceProxy({
+  fetchPlace = (point) => fetchRegionalPlace(point, { zoom: 14, preferSuburb: true }),
+  now = Date.now,
+} = {}) {
+  const cache = new Map();
+  const inFlight = new Map();
+  const allowed = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 40 });
+  const install = (middlewares) => middlewares.use('/api/regional-place', async (req, res) => {
+    const send = (status, body) => {
+      res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store',
+        ...(status === 429 || status === 503 ? { 'Retry-After': '30' } : {}) });
+      res.end(JSON.stringify(body));
+    };
+    if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
+    const point = validRegionalPoint(new URL(req.url || '', 'http://localhost').searchParams);
+    if (!point) return send(400, { error: 'Valid latitude and longitude are required' });
+    if (!allowed(clientKey(req))) return send(429, { error: 'Rate limit exceeded' });
+    // Match upstream precision; the cockpit's 0.1-degree cells can cross cities.
+    const key = `${point.latitude.toFixed(5)},${point.longitude.toFixed(5)}`;
+    const cached = cache.get(key);
+    if (cached && now() < cached.expires) return send(cached.status, cached.body);
+    if (!inFlight.has(key) && inFlight.size >= 8) return send(503, { error: 'Place lookup busy' });
+    if (!inFlight.has(key)) {
+      const request = Promise.resolve().then(() => fetchPlace(point)).then((place) => ({
+        status: 200, body: { coordinates: point, place }, expires: now() + REGIONAL_BRIEF_CACHE_MS,
+      })).catch(() => ({
+        status: 503, body: { error: 'Place temporarily unavailable' }, expires: now() + 30_000,
+      })).then((entry) => {
+        cache.delete(key);
+        cache.set(key, entry);
+        if (cache.size > 64) cache.delete(cache.keys().next().value);
+        return entry;
+      }).finally(() => inFlight.delete(key));
+      inFlight.set(key, request);
+    }
+    const entry = await inFlight.get(key);
+    return send(entry.status, entry.body);
+  });
+  return {
+    name: 'regional-place-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
 }
 
 async function fetchRegionalNews(place) {
@@ -7781,6 +7834,7 @@ export default defineConfig(({ mode }) => {
       regionalSourceProxy(),
       regionalImageryProxy(),
       regionalBriefProxy(),
+      regionalPlaceProxy(),
       weatherEffectsProxy(),
       cctvProxy(),
       radioBrowserProxy(),
