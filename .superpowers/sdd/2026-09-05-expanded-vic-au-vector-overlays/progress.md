@@ -31,6 +31,19 @@
 - Task 1 re-review 1 confirmed the EPA contract fix but found one remaining P2: catalogue wording equated runtime eligibility with an implemented proxy/layer even though AIHW is eligible but not yet wired. Fix round 2/5 scopes integration status per entry.
 - Task 1 final re-review passed with zero actionable findings. Task 1 complete at `cea0304`; runtime verification remains 2,775 passed, 0 failed, 1 skipped, with build clean.
 - Task 2 preflight: live ArcGIS 11.1 metadata confirmed six emergency layers, three health layers, and one composite gazetteer layer in decimal degrees; exact field schemas captured for allow-list design.
+- Task 2 dispatched to implementer `Peirce` (`01a06ff2-bf73-73b3-bede-878c32d93951`) from base `3b718a1`.
+- Task 2 implementation committed as `fa88838`: fixed GA ArcGIS adapters and
+  proxy paths for six emergency, three health and one gazetteer sublayer;
+  strict field allow-lists, two-page/1 MiB/1,000-feature caps, sanitized
+  reference-only output, partial-layer status and exact GA/G-NAF attribution.
+- Task 2 focused verification passed 57/57; full suite passed 2,793 with 0
+  failures and 1 expected Node-version benchmark skip; production build passed
+  at 161 modules and `git diff --check` passed.
+- Task 2 live read-only smoke normalized 53 emergency and 529 health features
+  in the Melbourne bbox. The full gazetteer proxy returned 1,000 features with
+  honest partial/capped status in 33.766 seconds. Visible category-layer and
+  deployed-host proof remain Task 6/deployment gates. Independent review is
+  pending; no push or deployment occurred.
 - Task 1 TDD implementation is complete. The controller approved a bounded
   correction to the two stale `src/data/regionalLayer.test.mjs` fixtures; they
   now use `melbourne-trees` while preserving route, clustering, source-local
