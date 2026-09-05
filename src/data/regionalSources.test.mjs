@@ -132,6 +132,30 @@ test('never surfaces suppressed AIHW values as numbers', () => {
   assert.deepEqual(properties.caveats, [{ code: 'NP', label: 'Suppressed', footnote: 'Not published for confidentiality reasons' }]);
 });
 
+test('deduplicates mirrored AIHW suppression caveats while retaining distinct notices', () => {
+  const result = normalizeRegionalFeatureCollection('au-hospital-ed-performance', {
+    extract: {
+      result: { data: [{
+        reporting_unit_code: 'H9999', reporting_unit_name: 'Example Public Hospital', reporting_unit_type_code: 'H',
+        measure_code: 'MYH0011', measure_name: 'Number of patients presenting to the emergency department',
+        reported_measure_code: 'MYH-RM0030', reported_measure_name: 'Resuscitation',
+        reporting_start_date: '2024-07-01', reporting_end_date: '2025-06-30', value: null,
+        suppression: '<5', suppression_codes: 'X01', suppression_footnotes: '<5',
+        caveat: '<5', caveat_codes: 'X01', caveat_footnotes: '<5',
+        data_set_caveat: 'Data revised after publication', data_set_caveat_codes: 'R01',
+        data_set_caveat_footnotes: 'Revision applies to this reporting period',
+      }] },
+      version_information: { data_version: 2026052802, date_uploaded: '2026-05-28T00:00:00' },
+    },
+    reportingUnits: { result: [{ reporting_unit_code: 'H9999', latitude: -37.81, longitude: 144.96 }] },
+  });
+
+  assert.deepEqual(result.features[0].properties.caveats, [
+    { code: 'X01', label: '<5', footnote: '<5' },
+    { code: 'R01', label: 'Data revised after publication', footnote: 'Revision applies to this reporting period' },
+  ]);
+});
+
 test('rejected hospital and camera decisions fail closed before payload access', () => {
   const unreadablePayload = {
     get result() {

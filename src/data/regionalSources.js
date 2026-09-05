@@ -277,6 +277,7 @@ function ptvFeatures(payload, maxFeatures) {
 
 function aihwCaveats(row) {
   const caveats = [];
+  const seen = new Set();
   const append = (label, code, footnote) => {
     if (!cleanText(label) && !cleanText(code, 180)) return;
     const normalized = {
@@ -284,7 +285,11 @@ function aihwCaveats(row) {
       ...(cleanText(label) ? { label: cleanText(label) } : {}),
       ...(cleanText(footnote) ? { footnote: cleanText(footnote) } : {}),
     };
-    if (Object.keys(normalized).length) caveats.push(normalized);
+    const key = JSON.stringify(normalized);
+    if (Object.keys(normalized).length && !seen.has(key)) {
+      seen.add(key);
+      caveats.push(normalized);
+    }
   };
   append(row?.suppression, row?.suppression_codes, row?.suppression_footnotes || row?.caveat_footnotes);
   append(row?.caveat, row?.caveat_codes, row?.caveat_footnotes);
