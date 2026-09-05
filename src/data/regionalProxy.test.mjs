@@ -271,6 +271,54 @@ test('regional proxy fetches fixed OGC GeoJSON and strips provider IDs and unsaf
   assert.doesNotMatch(response.body, /internal\.99|secret note|"id":99/);
 });
 
+test('regional proxy admits all six final-gap WFS sources through the shared OGC path', async () => {
+  const requested = [];
+  const middleware = createRegionalProxy({
+    fetchImpl: async (input) => {
+      requested.push(new URL(input).searchParams.get('typeName'));
+      return regionalResponseJson({ type: 'FeatureCollection', numberMatched: 0, numberReturned: 0, features: [] });
+    },
+  });
+  const sourceIds = ['vic-ev-chargers', 'vic-renewable-facilities', 'vic-flood-history-2022', 'vic-epa-priority-sites', 'vic-landfill-register', 'vic-recreation-assets'];
+  const responses = [];
+  for (const [index, sourceId] of sourceIds.entries()) {
+    responses.push(await invokeRegional(
+      middleware,
+      `/api/regional/${sourceId}?west=${144.9 + index / 100}&south=-37.9&east=${144.905 + index / 100}&north=-37.895`,
+    ));
+  }
+  assert.deepEqual(responses.map(({ status }) => status), Array(6).fill(200));
+  assert.deepEqual(requested.sort(), [
+    'open-data-platform:dcav_site',
+    'open-data-platform:psr_polygon',
+    'open-data-platform:recweb_asset',
+    'open-data-platform:renewables',
+    'open-data-platform:vic_flood_history_public',
+    'open-data-platform:vlr_polygon',
+  ]);
+});
+
+test('regional proxy applies the flood-only response byte ceiling without lowering the global OGC cap', async () => {
+  const payload = JSON.stringify({ type: 'FeatureCollection', numberMatched: 0, numberReturned: 0, features: [] });
+  const responseWithPadding = (bytes) => new Response(`${payload}${' '.repeat(bytes - payload.length)}`, {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const floodAtOnePointFourMb = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => responseWithPadding(1_400_000),
+  }), `/api/regional/vic-flood-history-2022${MELBOURNE_BOUNDS}`);
+  const floodAtOnePointSixMb = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => responseWithPadding(1_600_000),
+  }), `/api/regional/vic-flood-history-2022${MELBOURNE_BOUNDS}`);
+  const parkAtOnePointSixMb = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => responseWithPadding(1_600_000),
+  }), `/api/regional/vic-parks${MELBOURNE_BOUNDS}`);
+  assert.equal(floodAtOnePointFourMb.status, 200);
+  assert.equal(floodAtOnePointSixMb.status, 502);
+  assert.deepEqual(JSON.parse(floodAtOnePointSixMb.body), { error: 'regional source response was too large' });
+  assert.equal(parkAtOnePointSixMb.status, 200);
+});
+
 test('regional proxy sanitizes exhausted OGC topology validation as invalid provider data', async () => {
   const features = Array.from({ length: 70 }, (_, rowIndex) => {
     const polygons = Array.from({ length: 65 }, (_, polygonIndex) => {

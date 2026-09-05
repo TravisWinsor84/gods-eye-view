@@ -52,6 +52,10 @@ const OGC_FEATURE_SOURCES = Object.freeze({
     typeName: 'open-data-platform:vic_flood_history_public',
     propertyName: 'geom,subtype,obs_date,source,label',
     geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
+    maxInputCoordinatesPerFeature: 60_000,
+    maxInputCoordinatesPerResponse: 75_000,
+    maxOutputCoordinatesPerFeature: 4_000,
+    maxTopologyComparisons: 500_000,
   }),
   'vic-epa-priority-sites': Object.freeze({
     endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
@@ -78,6 +82,12 @@ export const OGC_SOURCE_CREDITS = Object.freeze({
   'vic-parks': 'State of Victoria (DataVic)',
   'vic-recreation-tracks': 'State of Victoria (DataVic)',
   'vic-heritage': 'State of Victoria (DataVic)',
+  'vic-ev-chargers': 'State of Victoria (DataVic)',
+  'vic-renewable-facilities': 'State of Victoria (DataVic)',
+  'vic-flood-history-2022': 'State of Victoria (DataVic)',
+  'vic-epa-priority-sites': 'State of Victoria (DataVic)',
+  'vic-landfill-register': 'State of Victoria (DataVic)',
+  'vic-recreation-assets': 'State of Victoria (DataVic)',
 });
 
 function sourceConfig(sourceId) {
@@ -140,6 +150,16 @@ function isoDate(value) {
   }
 }
 
+function finiteNonNegative(value) {
+  const number = typeof value === 'number' ? value : Number.NaN;
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function knownText(value, maxLength = MAX_TEXT_LENGTH) {
+  const text = cleanText(value, maxLength);
+  return /^(?:not available|n\/?a|unknown)$/i.test(text) ? '' : text;
+}
+
 function position(value, meter) {
   if (!Array.isArray(value) || value.length < 2 || value.some(Array.isArray)) {
     throw codedError('invalid OGC geometry position', 'INVALID_OGC_GEOMETRY');
@@ -153,10 +173,10 @@ function position(value, meter) {
   }
   meter.feature += 1;
   meter.response += 1;
-  if (meter.response > MAX_INPUT_COORDINATES_PER_RESPONSE) {
+  if (meter.response > meter.maxInputCoordinatesPerResponse) {
     throw codedError('OGC geometry coordinate limit exceeded', 'OGC_COORDINATE_LIMIT');
   }
-  if (meter.feature > MAX_INPUT_COORDINATES_PER_FEATURE) {
+  if (meter.feature > meter.maxInputCoordinatesPerFeature) {
     throw codedError('invalid OGC feature coordinate count', 'INVALID_OGC_GEOMETRY');
   }
   return [longitude, latitude];
@@ -197,7 +217,7 @@ function signedArea(ring) {
 
 function consumeTopologyBudget(budget, count = 1) {
   budget.comparisons += count;
-  if (budget.comparisons > MAX_TOPOLOGY_COMPARISONS) {
+  if (budget.comparisons > budget.maxComparisons) {
     throw codedError('OGC geometry topology validation limit exceeded', 'OGC_TOPOLOGY_LIMIT');
   }
 }
@@ -402,19 +422,19 @@ function simplifyRing(ringValue, limit, budget) {
   return simplified;
 }
 
-function simplifyHeritagePolygons(polygons, budget) {
+function simplifyPolygons(polygons, maxOutputCoordinates, budget, errorLabel) {
   const rings = polygons.flat();
-  if (rings.length > MAX_RINGS_PER_FEATURE || rings.length * 4 > MAX_HERITAGE_OUTPUT_COORDINATES) {
-    throw codedError('invalid OGC heritage geometry size', 'INVALID_OGC_GEOMETRY');
+  if (rings.length > MAX_RINGS_PER_FEATURE || rings.length * 4 > maxOutputCoordinates) {
+    throw codedError(`invalid OGC ${errorLabel} geometry size`, 'INVALID_OGC_GEOMETRY');
   }
   const current = rings.reduce((sum, item) => sum + item.length, 0);
-  if (current <= MAX_HERITAGE_OUTPUT_COORDINATES) return polygons;
+  if (current <= maxOutputCoordinates) return polygons;
   const base = rings.length * 4;
-  const available = MAX_HERITAGE_OUTPUT_COORDINATES - base;
+  const available = maxOutputCoordinates - base;
   const weights = rings.map((item) => Math.max(0, item.length - 4));
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
   const limits = weights.map((weight) => 4 + Math.floor((available * weight) / totalWeight));
-  let remaining = MAX_HERITAGE_OUTPUT_COORDINATES - limits.reduce((sum, limit) => sum + limit, 0);
+  let remaining = maxOutputCoordinates - limits.reduce((sum, limit) => sum + limit, 0);
   for (let index = 0; remaining > 0; index = (index + 1) % limits.length) {
     if (limits[index] < rings[index].length) { limits[index] += 1; remaining -= 1; }
   }
@@ -445,9 +465,15 @@ function normalizeGeometry(sourceId, geometry, meter) {
     return polygon.map((item) => ring(item, meter));
   });
   validatePolygonTopology(polygons, meter.topology);
-  if (sourceId === 'vic-heritage') {
-    const simplified = simplifyHeritagePolygons(polygons, meter.topology);
-    if (simplified !== polygons) validatePolygonTopology(simplified, meter.topology);
+  const maxOutputCoordinates = source.maxOutputCoordinatesPerFeature
+    ?? (sourceId === 'vic-heritage' ? MAX_HERITAGE_OUTPUT_COORDINATES : null);
+  if (maxOutputCoordinates !== null) {
+    const simplified = simplifyPolygons(polygons, maxOutputCoordinates, meter.topology,
+      sourceId === 'vic-heritage' ? 'heritage' : 'flood');
+    if (simplified !== polygons) {
+      validatePolygonTopology(simplified, meter.topology);
+      meter.simplifiedFeatures += 1;
+    }
     polygons = simplified;
   }
   return {
@@ -495,6 +521,97 @@ function publicProperties(sourceId, input) {
       caveat: 'Reference alignment only; not live closure or condition state.',
     };
   }
+  if (sourceId === 'vic-ev-chargers') {
+    const numberOfChargers = finiteNonNegative(input?.number_of_chargers);
+    return {
+      title: cleanText(input?.location, 180) || cleanText(input?.company, 180) || 'Victorian funded EV charger site',
+      sourceId, source: 'State of Victoria (DataVic)', freshnessClass: 'reference', referenceOnly: true,
+      ...(cleanText(input?.location, 180) ? { location: cleanText(input.location, 180) } : {}),
+      ...(cleanText(input?.region, 120) ? { region: cleanText(input.region, 120) } : {}),
+      ...(cleanText(input?.lead_organisation, 180) ? { leadOrganisation: cleanText(input.lead_organisation, 180) } : {}),
+      ...(isoDate(input?.estimated_project_completion) ? { estimatedProjectCompletion: isoDate(input.estimated_project_completion) } : {}),
+      ...(cleanText(input?.plug_type, 180) ? { plugType: cleanText(input.plug_type, 180) } : {}),
+      ...(cleanText(input?.company, 180) ? { company: cleanText(input.company, 180) } : {}),
+      ...(numberOfChargers === null ? {} : { numberOfChargers }),
+      caveat: 'Reference government-funded site only; not occupancy, service, pricing or live availability.',
+    };
+  }
+  if (sourceId === 'vic-renewable-facilities') {
+    const sizeMw = finiteNonNegative(input?.size_mw);
+    const turbines = finiteNonNegative(input?.turbines);
+    return {
+      title: cleanText(input?.name, 180) || 'Victorian renewable facility area',
+      sourceId, source: 'State of Victoria (DataVic)', freshnessClass: 'unknown', referenceOnly: true,
+      ...(cleanText(input?.type, 120) ? { facilityType: cleanText(input.type, 120) } : {}),
+      ...(cleanText(input?.approval_status, 120) ? { approvalStatus: cleanText(input.approval_status, 120) } : {}),
+      ...(cleanText(input?.construction_status, 120) ? { constructionStatus: cleanText(input.construction_status, 120) } : {}),
+      ...(cleanText(input?.lga, 120) ? { lga: cleanText(input.lga, 120) } : {}),
+      ...(sizeMw === null ? {} : { sizeMw }),
+      ...(turbines === null ? {} : { turbines }),
+      ...(cleanText(input?.ancillary_battery, 120) ? { ancillaryBattery: cleanText(input.ancillary_battery, 120) } : {}),
+      ...(typeof input?.ancillary_battery_size === 'number' && Number.isFinite(input.ancillary_battery_size)
+        ? { ancillaryBatterySize: input.ancillary_battery_size }
+        : cleanText(input?.ancillary_battery_size, 120) ? { ancillaryBatterySize: cleanText(input.ancillary_battery_size, 120) } : {}),
+      caveat: 'Planning and infrastructure context only; not live generation or operating state.',
+    };
+  }
+  if (sourceId === 'vic-flood-history-2022') {
+    const subtype = typeof input?.subtype === 'number' && Number.isFinite(input.subtype)
+      ? input.subtype : cleanText(input?.subtype, 80);
+    return {
+      title: cleanText(input?.label, 180) || 'October 2022 observed flood evidence',
+      sourceId, source: 'State of Victoria (DataVic)', freshnessClass: 'historical', referenceOnly: true, historical: true,
+      ...(subtype === '' ? {} : { subtype }),
+      ...(isoDate(input?.obs_date) ? { observedAt: isoDate(input.obs_date) } : {}),
+      ...(cleanText(input?.source, 180) ? { evidenceSource: cleanText(input.source, 180) } : {}),
+      ...(cleanText(input?.label, 180) ? { label: cleanText(input.label, 180) } : {}),
+      caveat: 'Historical and incomplete October 2022 observed evidence only; not current or peak extent, flash-flood coverage or warning.',
+    };
+  }
+  if (sourceId === 'vic-epa-priority-sites') {
+    const suburb = cleanText(input?.suburb, 120);
+    const municipality = cleanText(input?.municipality, 120);
+    return {
+      title: `${suburb || municipality || 'Victorian'} priority site register area`,
+      sourceId, source: 'State of Victoria (DataVic)', freshnessClass: 'reference', referenceOnly: true,
+      ...(municipality ? { municipality } : {}), ...(suburb ? { suburb } : {}),
+      ...(cleanText(input?.issue, 240) ? { issue: cleanText(input.issue, 240) } : {}),
+      ...(isoDate(input?.data_extracted_on) ? { dataExtractedAt: isoDate(input.data_extracted_on) } : {}),
+      caveat: 'Priority Sites Register footprint; absence does not mean land is uncontaminated or safe.',
+    };
+  }
+  if (sourceId === 'vic-landfill-register') {
+    const suburb = cleanText(input?.suburb, 120);
+    const landfillName = knownText(input?.landfill_name, 180);
+    return {
+      title: landfillName || `${suburb || 'Victorian'} landfill register area`,
+      sourceId, source: 'State of Victoria (DataVic)', freshnessClass: 'reference', referenceOnly: true,
+      ...(suburb ? { suburb } : {}),
+      ...(cleanText(input?.council, 180) ? { council: cleanText(input.council, 180) } : {}),
+      ...(landfillName ? { landfillName } : {}),
+      ...(cleanText(input?.operating_status, 120) ? { operatingStatus: cleanText(input.operating_status, 120) } : {}),
+      ...(cleanText(input?.waste_type_accepted, 180) ? { wasteTypeAccepted: cleanText(input.waste_type_accepted, 180) } : {}),
+      ...(cleanText(input?.estimated_year_of_closure, 80) ? { estimatedYearOfClosure: cleanText(input.estimated_year_of_closure, 80) } : {}),
+      ...(cleanText(input?.estimated_total_waste_volume, 120) ? { estimatedTotalWasteVolume: cleanText(input.estimated_total_waste_volume, 120) } : {}),
+      ...(isoDate(input?.data_extracted_on) ? { dataExtractedAt: isoDate(input.data_extracted_on) } : {}),
+      caveat: 'Reference register with possible register lag; not current operation or safety evidence.',
+    };
+  }
+  if (sourceId === 'vic-recreation-assets') {
+    return {
+      title: cleanText(input?.name, 180) || cleanText(input?.label, 180) || 'Victorian recreation asset',
+      sourceId, source: 'State of Victoria (DataVic)', freshnessClass: 'reference', referenceOnly: true,
+      ...(cleanText(input?.asset_cls, 120) ? { assetClass: cleanText(input.asset_cls, 120) } : {}),
+      ...(cleanText(input?.category, 120) ? { category: cleanText(input.category, 120) } : {}),
+      ...(cleanText(input?.dis_access, 120) ? { disabilityAccess: cleanText(input.dis_access, 120) } : {}),
+      ...(cleanText(input?.label, 180) ? { label: cleanText(input.label, 180) } : {}),
+      ...(cleanText(input?.published, 20) ? { published: cleanText(input.published, 20) } : {}),
+      ...(isoDate(input?.vers_date) ? { versionDate: isoDate(input.vers_date) } : {}),
+      ...(cleanText(input?.fac_type, 120) ? { facilityType: cleanText(input.fac_type, 120) } : {}),
+      ...(cleanText(input?.type_, 120) ? { assetType: cleanText(input.type_, 120) } : {}),
+      caveat: 'Public-land amenity inventory; inventory presence does not prove the asset is open or maintained.',
+    };
+  }
   return {
     title: cleanText(input?.site_name, 180) || 'Victorian heritage place',
     sourceId, source: 'State of Victoria (DataVic)', freshnessClass: 'unknown', referenceOnly: true,
@@ -525,9 +642,33 @@ function normalizedFeature(sourceId, row, meter) {
   };
 }
 
+function normalizationMeter(sourceId) {
+  const source = sourceConfig(sourceId);
+  return {
+    feature: 0,
+    response: 0,
+    simplifiedFeatures: 0,
+    topology: { comparisons: 0, maxComparisons: source.maxTopologyComparisons ?? MAX_TOPOLOGY_COMPARISONS },
+    maxInputCoordinatesPerFeature: source.maxInputCoordinatesPerFeature ?? MAX_INPUT_COORDINATES_PER_FEATURE,
+    maxInputCoordinatesPerResponse: source.maxInputCoordinatesPerResponse ?? MAX_INPUT_COORDINATES_PER_RESPONSE,
+  };
+}
+
+function outputCoordinateCount(features) {
+  let count = 0;
+  const stack = features.map((item) => item.geometry.coordinates);
+  while (stack.length) {
+    const value = stack.pop();
+    if (!Array.isArray(value)) continue;
+    if (value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') count += 1;
+    else for (const child of value) stack.push(child);
+  }
+  return count;
+}
+
 /** Normalize one WFS feature without retaining provider identifiers. */
 export function normalizeOgcFeature(sourceId, row) {
-  const normalized = normalizedFeature(sourceId, row, { feature: 0, response: 0, topology: { comparisons: 0 } });
+  const normalized = normalizedFeature(sourceId, row, normalizationMeter(sourceId));
   return normalized ? {
     ...normalized.feature,
     id: `ogc-${sourceId}-${stableHash(normalized.identity)}`,
@@ -565,7 +706,7 @@ export function normalizeOgcPayload(sourceId, payload, { maxFeatures = MAX_FEATU
     ? payload.features.length === maxFeatures
     : matchedCandidate > payload.features.length;
 
-  const meter = { feature: 0, response: 0, topology: { comparisons: 0 } };
+  const meter = normalizationMeter(sourceId);
   const byIdentity = new Map();
   let invalidFeatures = 0;
   let duplicateFeatures = 0;
@@ -593,7 +734,7 @@ export function normalizeOgcPayload(sourceId, payload, { maxFeatures = MAX_FEATU
   if (features.length === 0 && (payload.features.length > 0 || (matchedCandidate !== null && matchedCandidate > 0))) {
     throw codedError('OGC response contained no valid features', 'INVALID_OGC_RESPONSE');
   }
-  const partial = capped || invalidFeatures > 0 || duplicateFeatures > 0;
+  const partial = capped || invalidFeatures > 0 || duplicateFeatures > 0 || meter.simplifiedFeatures > 0;
   return {
     type: 'FeatureCollection', features,
     sourceStatus: {
@@ -603,6 +744,8 @@ export function normalizeOgcPayload(sourceId, payload, { maxFeatures = MAX_FEATU
       invalidFeatures,
       duplicateFeatures,
       coordinateCount: meter.response,
+      outputCoordinateCount: outputCoordinateCount(features),
+      simplifiedFeatures: meter.simplifiedFeatures,
     },
   };
 }
@@ -613,4 +756,10 @@ export const OGC_GEOMETRY_LIMITS = Object.freeze({
   maxCoordinatesPerResponse: MAX_INPUT_COORDINATES_PER_RESPONSE,
   maxHeritageOutputCoordinates: MAX_HERITAGE_OUTPUT_COORDINATES,
   maxTopologyComparisons: MAX_TOPOLOGY_COMPARISONS,
+  floodHistory2022: Object.freeze({
+    maxCoordinatesPerFeature: 60_000,
+    maxCoordinatesPerResponse: 75_000,
+    maxOutputCoordinatesPerFeature: 4_000,
+    maxTopologyComparisons: 500_000,
+  }),
 });

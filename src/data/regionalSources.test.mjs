@@ -26,6 +26,12 @@ test('registry declares the approved regional source IDs with immutable source c
     'vic-parks',
     'vic-recreation-tracks',
     'vic-heritage',
+    'vic-ev-chargers',
+    'vic-renewable-facilities',
+    'vic-flood-history-2022',
+    'vic-epa-priority-sites',
+    'vic-landfill-register',
+    'vic-recreation-assets',
     'melbourne-drinking-fountains',
     'melbourne-barbecues',
     'melbourne-parking-live',
@@ -54,6 +60,17 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['vic-parks'].geometry, 'polygon');
   assert.equal(REGIONAL_SOURCES['vic-recreation-tracks'].geometry, 'line');
   assert.equal(REGIONAL_SOURCES['vic-heritage'].refresh, 'unknown publisher cadence; daily viewport cache');
+  assert.equal(REGIONAL_SOURCES['vic-ev-chargers'].geometry, 'point');
+  assert.equal(REGIONAL_SOURCES['vic-renewable-facilities'].geometry, 'polygon');
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxFeatures, 1);
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxResponseBytes, 1_500_000);
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxInputCoordinatesPerFeature, 60_000);
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxInputCoordinatesPerResponse, 75_000);
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxOutputCoordinatesPerFeature, 4_000);
+  assert.equal(REGIONAL_SOURCES['vic-flood-history-2022'].maxTopologyComparisons, 500_000);
+  assert.match(REGIONAL_SOURCES['vic-epa-priority-sites'].refresh, /absence does not mean uncontaminated or safe/i);
+  assert.match(REGIONAL_SOURCES['vic-landfill-register'].refresh, /possible register lag/i);
+  assert.match(REGIONAL_SOURCES['vic-recreation-assets'].refresh, /does not prove open or maintained/i);
   assert.equal(REGIONAL_SOURCES['melbourne-parking-live'].refreshMs, 120_000);
   assert.equal(REGIONAL_SOURCES['melbourne-parking-live'].maxStaleMs, 600_000);
   assert.equal(REGIONAL_SOURCES['melbourne-drinking-fountains'].maxStaleMs, 259_200_000);
@@ -409,5 +426,8 @@ test('attribution is exact, source-scoped, and rejects unknown IDs', () => {
   assert.equal(regionalSourceAttribution('au-place-names'), 'Geoscience Australia');
   assert.match(regionalSourceAttribution('au-dea-hotspots'), /Creative Commons Attribution 4\.0 International Licence\. Observe and retain any copyright or related notices that may accompany this material as part of the attribution/);
   assert.equal(regionalSourceAttribution('melbourne-parking-live'), 'City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.');
+  for (const sourceId of ['vic-ev-chargers', 'vic-renewable-facilities', 'vic-flood-history-2022', 'vic-epa-priority-sites', 'vic-landfill-register', 'vic-recreation-assets']) {
+    assert.equal(regionalSourceAttribution(sourceId), 'State of Victoria (DataVic)');
+  }
   assert.throws(() => regionalSourceAttribution('nope'), /Unknown regional source: nope/);
 });

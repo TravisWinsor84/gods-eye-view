@@ -67,6 +67,81 @@ test('builds the six final-gap DataVic requests with exact public property allow
   }
 });
 
+test('normalizes final-gap DataVic fields into safe reference meanings without provider-private fields', () => {
+  const cases = [
+    ['vic-ev-chargers', { location: 'Tatura', region: 'Hume', lead_organisation: 'Tatura Carwash', estimated_project_completion: '2025-06-30', plug_type: 'CCS2', company: 'Example operator', number_of_chargers: 2 }, 'Point', [144.95, -37.8], ['location', 'region', 'leadOrganisation', 'estimatedProjectCompletion', 'plugType', 'company', 'numberOfChargers'], /funded.*not.*(?:occupancy|live availability)/i],
+    ['vic-renewable-facilities', { name: 'Macorna Solar Farm', type: 'Solar', approval_status: 'Approved', construction_status: 'Not Constructed', lga: 'Gannawarra', size_mw: 100, turbines: 0, ancillary_battery: 'Proposed', ancillary_battery_size: '20 MW' }, 'MultiPolygon', [POLYGON.coordinates], ['facilityType', 'approvalStatus', 'constructionStatus', 'lga', 'sizeMw', 'turbines', 'ancillaryBattery', 'ancillaryBatterySize'], /context.*not live generation/i],
+    ['vic-flood-history-2022', { subtype: 2, obs_date: '2022-11-01T00:00:00Z', source: 'Satellite Image Interpretation - Automated', label: 'Observed water' }, 'MultiPolygon', [POLYGON.coordinates], ['subtype', 'observedAt', 'evidenceSource', 'label'], /historical.*incomplete.*not current/i],
+    ['vic-epa-priority-sites', { municipality: 'Moreland', suburb: 'Pascoe Vale', issue: 'Requires assessment', data_extracted_on: '2026-09-05T07:30:00Z' }, 'MultiPolygon', [POLYGON.coordinates], ['municipality', 'suburb', 'issue', 'dataExtractedAt'], /absence.*not.*(?:uncontaminated|safe)/i],
+    ['vic-landfill-register', { suburb: 'Frankston North', council: 'Frankston City Council', landfill_name: 'Example landfill', operating_status: 'Closed', waste_type_accepted: 'Municipal Solid Waste', estimated_year_of_closure: '1992', estimated_total_waste_volume: 'Not available', data_extracted_on: '2026-09-05T18:11:04Z' }, 'MultiPolygon', [POLYGON.coordinates], ['suburb', 'council', 'landfillName', 'operatingStatus', 'wasteTypeAccepted', 'estimatedYearOfClosure', 'estimatedTotalWasteVolume', 'dataExtractedAt'], /register.*lag.*not current/i],
+    ['vic-recreation-assets', { name: 'Goat Island', asset_cls: 'JETTY', category: 'Water access', dis_access: 'Limited', label: 'Jetty', published: 'Y', vers_date: '2026-09-05T00:00:00Z', fac_type: 'ASSET', type_: 'Facility' }, 'Point', [144.95, -37.8], ['assetClass', 'category', 'disabilityAccess', 'label', 'published', 'versionDate', 'facilityType', 'assetType'], /inventory.*not.*(?:open|maintained)/i],
+  ];
+
+  for (const [sourceId, publicInput, geometryType, coordinates, publicKeys, caveat] of cases) {
+    const properties = {
+      ...publicInput,
+      id: 'private-id', ufi: 'private-ufi', address: 'private address', comments: 'private comments',
+      description: 'private description', latitude: -37.8, longitude: 144.95, external_link: 'https://private.invalid',
+      notice_number: 'private notice', licence_id: 'private licence', serial_no: 'private serial', photo_id: 'private photo',
+    };
+    const normalized = normalizeOgcFeature(sourceId, feature({ type: geometryType, coordinates }, properties, 'provider-private-id'));
+    assert.equal(normalized.properties.sourceId, sourceId);
+    assert.equal(normalized.properties.referenceOnly, true);
+    assert.match(normalized.properties.caveat, caveat, sourceId);
+    for (const key of publicKeys) assert.ok(Object.hasOwn(normalized.properties, key), `${sourceId}: ${key}`);
+    assert.doesNotMatch(JSON.stringify(normalized), /private-|provider-private|latitude|longitude|external_link|notice_number|licence_id|serial_no|photo_id/i);
+  }
+});
+
+test('uses safe regional fallback titles for untitled EPA and landfill polygons', () => {
+  const epa = normalizeOgcFeature('vic-epa-priority-sites', feature(POLYGON, { suburb: 'Pascoe Vale', municipality: 'Merri-bek' }));
+  const landfill = normalizeOgcFeature('vic-landfill-register', feature(POLYGON, { suburb: 'Frankston North', landfill_name: 'Not available' }));
+  assert.equal(epa.properties.title, 'Pascoe Vale priority site register area');
+  assert.equal(landfill.properties.title, 'Frankston North landfill register area');
+});
+
+test('simplifies a flood outlier deterministically within its source-only output cap and marks it partial', () => {
+  const openRing = Array.from({ length: 56_000 }, (_, index) => {
+    const angle = (index / 56_000) * Math.PI * 2;
+    return [145 + Math.cos(angle), -37 + Math.sin(angle)];
+  });
+  const ring = [...openRing, openRing[0]];
+  const payload = {
+    type: 'FeatureCollection', numberMatched: 1_826, numberReturned: 1,
+    features: [feature({ type: 'MultiPolygon', coordinates: [[ring]] }, {
+      subtype: 2, obs_date: '2022-11-01T00:00:00Z', source: 'Satellite interpretation', label: 'Observed extent',
+    })],
+  };
+  const first = normalizeOgcPayload('vic-flood-history-2022', payload, { maxFeatures: 1 });
+  const second = normalizeOgcPayload('vic-flood-history-2022', payload, { maxFeatures: 1 });
+  assert.deepEqual(first, second);
+  assert.equal(first.features[0].geometry.type, 'MultiPolygon');
+  assert.equal(first.features[0].geometry.coordinates.length, 1);
+  assert.equal(first.features[0].geometry.coordinates[0].length, 1);
+  assert.deepEqual(first.features[0].geometry.coordinates[0][0][0], first.features[0].geometry.coordinates[0][0].at(-1));
+  assert.equal(first.sourceStatus.coordinateCount, 56_001);
+  assert.ok(first.sourceStatus.outputCoordinateCount <= 4_000);
+  assert.equal(first.sourceStatus.simplifiedFeatures, 1);
+  assert.equal(first.sourceStatus.capped, true);
+  assert.equal(first.sourceStatus.status, 'partial');
+});
+
+test('keeps the flood input ceiling bounded and omits an oversized feature while retaining valid siblings', () => {
+  const tooLargeRing = Array.from({ length: 60_001 }, (_, index) => [144 + index / 1_000_000, -38]);
+  tooLargeRing.push(tooLargeRing[0]);
+  const result = normalizeOgcPayload('vic-flood-history-2022', {
+    type: 'FeatureCollection', numberMatched: 2, numberReturned: 2,
+    features: [
+      feature({ type: 'MultiPolygon', coordinates: [[tooLargeRing]] }, { label: 'Oversized' }),
+      feature({ type: 'MultiPolygon', coordinates: [POLYGON.coordinates] }, { label: 'Retained', obs_date: '2022-10-20' }),
+    ],
+  }, { maxFeatures: 2 });
+  assert.equal(result.features.length, 1);
+  assert.equal(result.features[0].properties.label, 'Retained');
+  assert.equal(result.sourceStatus.invalidFeatures, 1);
+  assert.equal(result.sourceStatus.status, 'partial');
+});
+
 test('hotspots retain observation uncertainty and confidence without IDs or safety-of-life claims', () => {
   const normalized = normalizeOgcFeature('au-dea-hotspots', feature(
     { type: 'Point', coordinates: [144.96, -37.81] },

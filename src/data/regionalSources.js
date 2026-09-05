@@ -181,6 +181,51 @@ export const REGIONAL_SOURCES = Object.freeze({
     refresh: 'unknown publisher cadence; daily viewport cache', credit: OGC_SOURCE_CREDITS['vic-heritage'],
     credential: 'none', runtimeEligible: true, maxFeatures: 250,
   }),
+  'vic-ev-chargers': Object.freeze({
+    name: 'Government Funded Public EV Chargers', source: 'DataVic', publisher: 'State of Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'point', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'monthly publisher cadence; daily viewport cache; funded-site reference only, not occupancy, pricing, service or live availability',
+    credit: OGC_SOURCE_CREDITS['vic-ev-chargers'], credential: 'none', runtimeEligible: true, maxFeatures: 200,
+  }),
+  'vic-renewable-facilities': Object.freeze({
+    name: 'Renewables Facility Location for Victoria', source: 'DataVic', publisher: 'State of Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'polygon', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'publisher cadence unstated; daily viewport cache; planning and infrastructure context only',
+    credit: OGC_SOURCE_CREDITS['vic-renewable-facilities'], credential: 'none', runtimeEligible: true, maxFeatures: 300,
+  }),
+  'vic-flood-history-2022': Object.freeze({
+    name: 'Victorian Flood History - October 2022 Event Public', source: 'DataVic', publisher: 'State of Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'polygon', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'historical incomplete October 2022 evidence; one-feature viewport cap; not current extent, peak extent, flash-flood coverage or warning',
+    credit: OGC_SOURCE_CREDITS['vic-flood-history-2022'], credential: 'none', runtimeEligible: true, maxFeatures: 1,
+    maxResponseBytes: 1_500_000, maxInputCoordinatesPerFeature: 60_000,
+    maxInputCoordinatesPerResponse: 75_000, maxOutputCoordinatesPerFeature: 4_000,
+    maxTopologyComparisons: 500_000,
+  }),
+  'vic-epa-priority-sites': Object.freeze({
+    name: 'EPA Victoria Priority Sites Register', source: 'DataVic', publisher: 'Environment Protection Authority Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'polygon', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'publisher cadence unstated; daily viewport cache; absence does not mean uncontaminated or safe',
+    credit: OGC_SOURCE_CREDITS['vic-epa-priority-sites'], credential: 'none', runtimeEligible: true, maxFeatures: 100,
+  }),
+  'vic-landfill-register': Object.freeze({
+    name: 'Victorian Landfill Register', source: 'DataVic', publisher: 'Environment Protection Authority Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'polygon', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'publisher cadence unstated; daily viewport cache; possible register lag and no current operation or safety inference',
+    credit: OGC_SOURCE_CREDITS['vic-landfill-register'], credential: 'none', runtimeEligible: true, maxFeatures: 300,
+  }),
+  'vic-recreation-assets': Object.freeze({
+    name: 'DEECA Recreation Assets', source: 'DataVic', publisher: 'State of Victoria',
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'point', refreshMs: 86_400_000, maxStaleMs: 604_800_000,
+    refresh: 'daily publisher cadence and viewport cache; inventory presence does not prove open or maintained',
+    credit: OGC_SOURCE_CREDITS['vic-recreation-assets'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
   'melbourne-drinking-fountains': Object.freeze({
     name: 'Melbourne Drinking Fountains', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
     endpoint: 'https://data.melbourne.vic.gov.au/explore/dataset/drinking-fountains/information/',
@@ -551,7 +596,9 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   else if (['au-emergency-facilities', 'au-health-facilities', 'au-place-names'].includes(sourceId)) {
     return normalizeGaRegionalPayload(sourceId, payload);
   }
-  else if (['au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage'].includes(sourceId)) {
+  else if (['au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage', 'vic-ev-chargers',
+    'vic-renewable-facilities', 'vic-flood-history-2022', 'vic-epa-priority-sites', 'vic-landfill-register',
+    'vic-recreation-assets'].includes(sourceId)) {
     return normalizeOgcPayload(sourceId, payload, { maxFeatures: source.maxFeatures });
   }
   else if (['melbourne-drinking-fountains', 'melbourne-barbecues', 'melbourne-parking-live', 'melbourne-development', 'melbourne-culture'].includes(sourceId)) {

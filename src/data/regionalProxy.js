@@ -20,7 +20,11 @@ const MELBOURNE_CIVIC_SOURCE_IDS = new Set([
   'melbourne-development',
   'melbourne-culture',
 ]);
-const OGC_SOURCE_IDS = new Set(['au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage']);
+const OGC_SOURCE_IDS = new Set([
+  'au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage',
+  'vic-ev-chargers', 'vic-renewable-facilities', 'vic-flood-history-2022',
+  'vic-epa-priority-sites', 'vic-landfill-register', 'vic-recreation-assets',
+]);
 const INDEXED_SOURCE_IDS = new Set(INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS);
 const OGC_TIMEOUT_MS = 20_000;
 const MAX_GA_PAGES_PER_LAYER = 2;
@@ -306,7 +310,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
             error.code = 'INVALID_OGC_RESPONSE';
             throw error;
           }
-          const payload = await readJsonCapped(response, OGC_MAX_RESPONSE_BYTES);
+          const payload = await readJsonCapped(response, source.maxResponseBytes ?? OGC_MAX_RESPONSE_BYTES);
           return normalizeOgcPayload(sourceId, payload, { maxFeatures: source.maxFeatures });
         } finally {
           clearTimeout(timer);
