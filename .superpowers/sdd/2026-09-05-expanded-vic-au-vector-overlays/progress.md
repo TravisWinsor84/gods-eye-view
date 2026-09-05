@@ -103,3 +103,19 @@
   counts include 6,324 parking sensors and 29,053 bays; arbitrary rows may be
   old while the maximum observation timestamp is current, so freshness is
   per-record and provider tables must be globally cached/indexed.
+- Task 3 dispatched to implementer `Pasteur` (`01a07026-07d9-7172-902f-a2910005b912`) from base `40065ea`.
+- Task 3 implementation committed as `47de628`: five fixed City of Melbourne
+  source adapters, two provider-wide parking exports cached for two minutes,
+  cached kerbside join/spatial index, strict public-field allow-lists, generated
+  IDs, per-record five-minute stale state, explicit last-good ceilings and the
+  actual City of Melbourne CC BY 4.0 data credit. No Task 6 pack membership was
+  added.
+- Live Melbourne-bbox smoke returned 245 fountains, 44 barbecues, 1,000 capped
+  parking points, 1,000 capped development points and 319 culture points. The
+  parking refresh used exactly two exports, read 6,324 sensors and 5,072 bays
+  with join keys, preserved maximum observation `2026-09-05T06:07:49+00:00`,
+  and marked 994/1,000 sampled points stale independently.
+- Fresh Task 3 verification: focused suites 74/74; full suite 2,822 passed, 0
+  failed, 1 expected Node-version allocation-benchmark skip; production build
+  passed at 162 modules; `git diff --check` passed. Independent review remains
+  pending; no push or deployment occurred.
