@@ -55,6 +55,30 @@ geometry caps. Do not expose owners or addresses, infer ownership, or present
 the geometry as a legal boundary determination. Catalogue cadence is weekly
 and licence is CC BY 4.0.
 
+Verified implementation contract:
+
+- Primary polygon layer: `Vicmap_Parcel/FeatureServer/0` (`PARCEL_MP`) at
+  `https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/ArcGIS/rest/services/Vicmap_Parcel/FeatureServer/0`.
+- Optional mutually-exclusive property view: `Vicmap_Property/FeatureServer/0`
+  (`PROPERTY_MP`). Road casements are a supplementary polygon layer at
+  `Vicmap_Property_Easements_and_Road_Casements/FeatureServer/1`; easement
+  layer 0 is polyline and is excluded from this polygon adapter.
+- The live services report `Query,Extract`, GeoJSON support and a provider
+  `maxRecordCount` of 2,000. The application cap remains 500 and requests 501
+  only to detect an overfull viewport; it does not silently truncate or page.
+- Admit only at zoom 18 or closer and independently enforce a Victoria-
+  intersecting bbox no more than 750 metres wide/high or 0.25 square kilometres.
+  Reject geometry over 5,000 coordinates/feature, 50,000/response, 128 rings,
+  or 2 MB decoded. Do not simplify cadastral geometry.
+- Request fixed public reference fields plus `OBJECTID` for deterministic
+  ordering, then strip `OBJECTID`, council property numbers, address-adjacent
+  identifiers, workflow/lineage fields, shape metrics and any future owner,
+  occupier, valuation, billing, contact or joined-address fields.
+- Label every result reference-only and not a survey or legal boundary
+  determination. The specific REST catalogue says weekly while broader product
+  records say continual; retain the conservative weekly claim and record the
+  catalogue inconsistency.
+
 Official dataset:
 https://discover.data.vic.gov.au/dataset/vicmap-property-rest-api
 
