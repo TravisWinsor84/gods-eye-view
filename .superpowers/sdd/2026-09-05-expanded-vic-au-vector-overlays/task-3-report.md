@@ -2,7 +2,9 @@
 
 ## Result
 
-Implementation commit: `47de6284b1a78bbb3d0272756a145f45b1f6e2e5`
+Implementation commits: `47de6284b1a78bbb3d0272756a145f45b1f6e2e5`,
+`680177650320dced7a9dfda79b402ea0b6399f42`, and
+`a992614b5f77c4b38acd7f8aa3648666ae903b90`.
 
 Task 3 adds fixed, credential-free City of Melbourne Opendatasoft v2.1
 adapters and regional proxy routes for:
@@ -47,16 +49,20 @@ two fixed v2.1 `exports/json` downloads for the provider-wide parking tables.
 - Parking output preserves exact `status_timestamp`, sensor `lastupdated` and
   bay `lastupdated`. `Present` and `Unoccupied` become observation labels only;
   no `available` property or legality claim is emitted.
-- Rows without joined bay geometry are omitted. Provider IDs are used only for
-  the server-side join and never returned; public feature IDs are generated
-  digests.
+- Rows without joined bay geometry are omitted. Provider row keys are used only
+  for server-side joins, stable paging and true-row deduplication. They are never
+  returned or copied reversibly; public feature IDs contain bounded one-way
+  digests, with deterministic collision handling.
 - Fountains/barbecues omit asset, contract, manager, maintenance, model and
   full location-description fields. Development omits development/property/
   application IDs and full addresses. Culture keeps only bounded public
-  title/type/date/locality/description metadata.
+  title/type/date metadata.
 - Partial datasets and retained pages stay source-local. Last-good ceilings are
-  ten minutes for parking, seven days for weekly civic assets, and thirty days
-  for monthly/unknown-cadence reference sources.
+  ten minutes for parking, 72 hours for daily fountains/barbecues, and thirty
+  days for monthly/unknown-cadence development and culture reference sources.
+- Public memorials use one provider-wide official JSON export, capped at 2 MiB
+  and 2,000 rows, cached for six hours and indexed in 0.05-degree cells before
+  bbox filtering. They do not use non-total offset ordering.
 - Exact City of Melbourne CC BY 4.0 attribution is registered in the actual
   Cesium data-attribution surface.
 
@@ -90,9 +96,10 @@ from an arbitrary or maximum row.
 Independent review and Task 6 browser-visible category integration remain
 separate gates.
 
-## Fix round 1/5 — independent-review findings
+## Independent-review fixes — current contract
 
-Fix round 1 resolves all eight findings from `task-3-review.md`:
+The two fix rounds resolve the findings from `task-3-review.md` and
+`task-3-rereview-1.md`:
 
 - each parking table now carries its immutable `lastSuccessfulAt`; a successful
   sibling refresh cannot renew an inherited failed table, and either table is
@@ -104,32 +111,30 @@ Fix round 1 resolves all eight findings from `task-3-review.md`:
 - aggregate parking status now counts current and stale observations. Mixed
   results are partial and an all-stale result is stale, producing a degraded
   proxy header rather than a fresh claim;
-- one FIFO semaphore now limits actual GA, Melbourne civic and existing
+- one FIFO semaphore now limits actual GA, Melbourne civic, PTV and existing
   regional provider fetch/read operations to four. Permit transfer is atomic,
-  queued requests start their timeout only after acquiring a slot, failures
-  release capacity, and the separate PTV path is unchanged;
-- fountains/barbecues now expose only type, inventory date and geometry;
-  culture exposes only bounded title, type and date. Address-bearing
-  description/property fields and parking road descriptions are neither
-  requested nor returned;
+  queued requests start their timeout only after acquiring a slot, and PTV
+  retains its permit through complete body consumption and decode. Status,
+  read, decode and timeout failures all release capacity;
 - civic responses must use `application/json` or an application `+json`
   variant. Wrong media types are rejected before body parsing or caching;
-- every offset-paginated spatial dataset uses a live-validated fixed
+- every offset-paginated spatial dataset uses a live-validated fixed unique
   `order_by`. Internal `assetid`, `development_key`, and `asset_id` fields are
-  ordering-only and are never selected, normalized or emitted. Public memorials
-  use fixed title/description ordering. Overlapping pages are deduplicated by
-  derived public feature identity and reported partial/capped; and
-- current City of Melbourne metadata records Daily cadence for fountains and
-  barbecues. Their last-good ceiling is now three missed daily publisher cycles
-  (72 hours), while the six-hour application refresh remains conservative.
+  selected only for stable internal identity and are never normalized or
+  emitted. True repeated source rows deduplicate by those keys while distinct
+  same-site development rows survive. Public memorials use the bounded cached
+  export/index path described above. The privacy and cadence contracts are
+  stated once in Runtime boundaries above.
 
 ### Fresh live smoke — 2026-09-05
 
 The same Melbourne bbox returned 245 fountains (current), 44 barbecues
-(current), 991 unique development points (partial/capped after defensive page
-deduplication), 319 culture points (current), and 1,000 parking points
-(partial/capped; 997 stale and 3 current observations). All five fixed ordering
-contracts and JSON media types were accepted by the official provider.
+(current), 1,000 development points (partial/capped with zero duplicate source
+keys), 319 culture points (current), and 1,000 parking points (partial/capped;
+997 stale and 3 current observations). The earlier 991 development count was
+caused by the now-removed public-spatial-identity collapse and is superseded.
+The memorial export returned both same-title/same-description `Painted Poles`
+records at distinct coordinates and with distinct generated IDs.
 
 ### Fresh verification after fix round 1
 
@@ -140,6 +145,24 @@ contracts and JSON media types were accepted by the official provider.
   on Node 26.8.1.
 - `npm run build`: passed; Vite transformed 162 modules.
 - `git diff --check`: passed.
+
+No pack membership, push, deployment, account, credential or provider mutation
+was performed. Independent re-review remains the next gate.
+
+### Fresh verification after fix round 2
+
+- RED-first regressions reproduced distinct development-row collapse, unstable
+  memorial pagination and eight concurrent mixed PTV/GA/civic requests.
+- Focused Task 3 plus shared proxy/GA/PTV concurrency suites: 114 passed, 0
+  failed.
+- Full `npm test`: 2,836 passed, 0 failed, 1 expected skip. The skipped
+  allocation microbenchmarks remain calibrated for Node 24; verification ran
+  on Node 26.8.1.
+- `npm run build`: passed; Vite transformed 162 modules.
+- `git diff --check`: passed.
+- Live safe smoke: 1,000 development features (`partial`/capped, zero duplicate
+  source keys), 319 culture features (`current`), and two distinct `Painted
+  Poles` records with distinct public IDs.
 
 No pack membership, push, deployment, account, credential or provider mutation
 was performed. Independent re-review remains the next gate.

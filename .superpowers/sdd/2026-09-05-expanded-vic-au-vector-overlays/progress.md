@@ -133,10 +133,33 @@
   enforced; fixed live-validated ordering plus defensive deduplication makes
   pagination honest; and fountains/barbecues now use Daily cadence with a
   three-missed-cycle 72-hour last-good ceiling.
-- Fresh fix-round live smoke returned 245 fountains, 44 barbecues, 991 unique
-  development points, 319 culture points and 1,000 capped parking points (997
-  stale, 3 current). Focused Task 3/shared GA/PTV concurrency suites passed
+- Fresh fix-round live smoke returned 245 fountains, 44 barbecues, 991
+  development points after the subsequently identified public-spatial-identity
+  collapse, 319 culture points and 1,000 capped parking points (997 stale, 3
+  current). Focused Task 3/shared GA/PTV concurrency suites passed
   110/110; full suite passed 2,832 with 0 failures and 1 expected Node-version
   allocation-benchmark skip; production build passed at 162 modules;
   `git diff --check` passed. Independent re-review remains pending; no push or
   deployment occurred.
+- Task 3 re-review found four remaining issues: public feature identity was also
+  being used as source-row identity and collapsed distinct same-site
+  developments; PTV bypassed the shared four-request provider semaphore;
+  memorial offset ordering was not total; and the report retained obsolete
+  privacy/cadence wording.
+- Task 3 fix round 2/5 is implemented at `a992614`. Opaque `assetid`,
+  `development_key` and `asset_id` values are now selected only as internal
+  source-row identities, true overlapping rows deduplicate by that identity,
+  public IDs use bounded one-way digests with collision handling, and no
+  provider key is emitted. Memorials now use a provider-wide JSON export capped
+  at 2 MiB/2,000 rows, cached six hours, deterministically indexed and filtered
+  by bbox. PTV fetch and full body consumption now run inside the same
+  process-wide four-request semaphore as GA/civic/legacy paths, with release on
+  every settlement path.
+- RED-first regressions failed on all three runtime defects before the fixes.
+  Fresh focused Task 3/shared GA/PTV concurrency suites passed 114/114; full
+  `npm test` passed 2,836 with 0 failures and 1 expected Node-version skip;
+  production build passed at 162 modules; `git diff --check` passed. A live safe
+  smoke returned 1,000 capped development rows with zero duplicate source keys,
+  319 current culture rows, and both distinct `Painted Poles` records with
+  distinct generated IDs. No push or deployment occurred; independent
+  re-review remains pending.
