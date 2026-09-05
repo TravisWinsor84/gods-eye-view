@@ -264,3 +264,8 @@
   microbenchmarks skipped under Node 26.8.1; production build passed with 163
   modules transformed and the existing large-chunk advisory. No push or
   deployment occurred.
+- Task 4 targeted re-review passed all runtime, live-source, topology,
+  fail-closed and attribution checks. Its only P3 was stale prose saying the
+  topology budget was 100,000 comparisons; the implementation and exported
+  contract use 150,000. Documentation now matches the runtime. Task 4 is
+  closed; no push or deployment occurred.

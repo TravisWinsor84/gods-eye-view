@@ -115,7 +115,7 @@ Polygon admission now validates shell/hole and sibling-polygon relationships
 before heritage simplification and validates them again afterwards. It does not
 require a particular GeoJSON winding direction, while simplification still
 must preserve each ring's original orientation. Ring scans, inter-ring checks,
-point containment and pair bounds checks share a 100,000-comparison budget per
+point containment and pair bounds checks share a 150,000-comparison budget per
 normalization and retain only linear ring/bounds storage. Budget exhaustion is
 sanitized by the proxy as invalid provider data. WFS numeric totals must be
 non-negative, at least the actual/returned feature count, and consistent with

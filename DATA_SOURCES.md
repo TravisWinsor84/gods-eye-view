@@ -106,7 +106,7 @@ cap, finite longitude/latitude, exact geometry nesting, 50,000 input coordinates
 per feature and 100,000 per response. Polygon holes must lie strictly inside
 their shell without touching or crossing it; holes may not overlap, touch or
 nest; and sibling multipolygon members may not overlap, touch or contain one
-another. Relationship and ring checks share a 100,000-comparison budget per
+another. Relationship and ring checks share a 150,000-comparison budget per
 normalization, with only linear bounds storage; exhausting it rejects the
 refresh. Ring direction is not an admission requirement because official
 GeoJSON is inconsistent, but simplification must preserve each ring's original
