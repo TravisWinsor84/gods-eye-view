@@ -210,11 +210,12 @@ async function regionalResponseError(response) {
     // The server contract is JSON, but client-facing errors remain sanitized
     // when an intermediary returns an empty or non-JSON response.
   }
-  const message = response?.status === 424 || regionalStatus === 'credentials-required'
+  const credentialsRequired = response?.status === 424 || regionalStatus === 'credentials-required';
+  const message = credentialsRequired
     ? 'regional source credentials required'
     : providerMessage || 'regional source is temporarily unavailable';
   const error = new Error(message);
-  error.regionalStatus = regionalStatus;
+  error.regionalStatus = credentialsRequired ? 'credentials-required' : regionalStatus;
   return error;
 }
 
@@ -361,6 +362,9 @@ export function createRegionalLayer({
       let successful = 0;
       for (const result of results) {
         if (result.error) {
+          if (result.error.regionalStatus === 'credentials-required') {
+            lastGoodBySource.delete(result.sourceId);
+          }
           errorsBySource.set(result.sourceId, sourceError(result.sourceId, result.error));
           statusBySource.set(result.sourceId, {
             status: result.error.regionalStatus || 'unavailable',

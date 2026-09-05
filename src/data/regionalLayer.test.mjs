@@ -433,6 +433,82 @@ test('preserves sanitized credentials-required status from a 424 response', asyn
   assert.doesNotMatch(layer.getStats().error, /HTTP 424/);
 });
 
+test('credential denial clears prior PTV vehicles and repeated denial cannot resurrect them', async () => {
+  const { viewer, added } = viewerStub();
+  const layer = createRegionalLayer({ id: 'regional-victoria', sourceIds: ['ptv-transit'] });
+  await layer.init(viewer);
+  await layer.enable(viewer);
+
+  let request = 0;
+  await withFetch(async () => {
+    request += 1;
+    if (request === 1) return response([pointFeature('ptv-safe', 144.96, -37.81)]);
+    return response([], 424, {
+      headers: { 'x-regional-status': 'credentials-required' },
+      body: { error: 'regional source credentials required' },
+    });
+  }, async () => {
+    assert.equal(await layer.update(viewer), true);
+    assert.deepEqual(added[0].entities.values.map((entity) => entity.id), [
+      'ptv-transit:ptv-safe',
+    ]);
+
+    assert.equal(await layer.update(viewer), false);
+    assert.deepEqual(added[0].entities.values, []);
+    assert.equal(layer.getStats().count, 0);
+    assert.equal(layer.getStats().status, 'unavailable');
+    assert.deepEqual(layer.getStats().sourceStatus, {
+      'ptv-transit': { status: 'credentials-required', modes: {} },
+    });
+
+    assert.equal(await layer.update(viewer), false);
+    assert.deepEqual(added[0].entities.values, []);
+    assert.equal(layer.getStats().count, 0);
+    assert.equal(layer.getStats().status, 'unavailable');
+    assert.deepEqual(layer.getStats().sourceStatus, {
+      'ptv-transit': { status: 'credentials-required', modes: {} },
+    });
+  });
+});
+
+test('PTV credential denial does not clear another source transient last-good cohort', async () => {
+  const { viewer, added } = viewerStub();
+  const layer = createRegionalLayer({
+    id: 'regional-victoria',
+    sourceIds: ['ptv-transit', 'vic-fire-context'],
+  });
+  await layer.init(viewer);
+  await layer.enable(viewer);
+
+  let refresh = 0;
+  await withFetch(async (url) => {
+    const sourceId = new URL(String(url), 'http://test').pathname.split('/').at(-1);
+    if (refresh === 0 && sourceId === 'ptv-transit') {
+      return response([pointFeature('ptv-safe', 144.96, -37.81)]);
+    }
+    if (refresh === 0) return response([pointFeature('fire-safe', 144.95, -37.82)]);
+    if (sourceId === 'ptv-transit') {
+      return response([], 424, {
+        headers: { 'x-regional-status': 'credentials-required' },
+        body: { error: 'regional source credentials required' },
+      });
+    }
+    throw new Error('temporary fire feed failure');
+  }, async () => {
+    assert.equal(await layer.update(viewer), true);
+    refresh = 1;
+    assert.equal(await layer.update(viewer), true);
+  });
+
+  assert.deepEqual(added[0].entities.values.map((entity) => entity.id), [
+    'vic-fire-context:fire-safe',
+  ]);
+  assert.equal(layer.getStats().count, 1);
+  assert.equal(layer.getStats().status, 'degraded');
+  assert.equal(layer.getStats().sourceStatus['ptv-transit'].status, 'credentials-required');
+  assert.match(layer.getStats().error, /temporary fire feed failure/);
+});
+
 test('surfaces per-mode stale and unavailable status as degraded while retaining available vehicles', async () => {
   const { viewer } = viewerStub();
   const layer = createRegionalLayer({ id: 'regional-victoria', sourceIds: ['ptv-transit'] });
