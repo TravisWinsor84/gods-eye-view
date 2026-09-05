@@ -28,6 +28,10 @@ function regionalTreePayload() {
   };
 }
 
+function gaPoint(properties, longitude = 144.96, latitude = -37.81) {
+  return { type: 'Feature', geometry: { type: 'Point', coordinates: [longitude, latitude] }, properties };
+}
+
 function invokeRegional(middleware, url, { method = 'GET' } = {}) {
   return new Promise((resolve, reject) => {
     const result = { status: 0, headers: {}, body: '' };
@@ -97,6 +101,115 @@ test('regional proxy builds a fixed official route from only the approved source
   assert.match(requestedUrl, /^https:\/\/data\.melbourne\.vic\.gov\.au\/api\/explore\/v2\.1\/catalog\/datasets\/trees-with-species-and-dimensions-urban-forest\/records\?/);
   assert.match(requestedUrl, /limit=1000/);
   assert.doesNotMatch(requestedUrl, /attacker|secret/);
+});
+
+test('regional proxy queries every fixed GA emergency sublayer and returns sanitized reference features', async () => {
+  const requested = [];
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      const url = new URL(input);
+      requested.push(url);
+      const layer = Number(url.pathname.match(/MapServer\/(\d+)\/query$/)?.[1]);
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: [gaPoint({
+          facility_name: `Facility ${layer}`, facility_operationalstatus: 'Operational', abs_suburb: 'Melbourne',
+          facility_address: 'private address', objectid: layer + 1, comment_: 'private note',
+        }, 144.95 + layer / 1_000)],
+      });
+    },
+  }), `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'fresh');
+  assert.deepEqual(requested.map((url) => Number(url.pathname.match(/MapServer\/(\d+)\/query$/)?.[1])), [0, 1, 2, 3, 4, 5]);
+  assert.ok(requested.every((url) => url.searchParams.get('outSR') === '4326'));
+  assert.ok(requested.every((url) => !/address|objectid|comment/i.test(url.searchParams.get('outFields'))));
+  const body = JSON.parse(response.body);
+  assert.equal(body.features.length, 6);
+  assert.equal(body.sourceStatus.status, 'current');
+  assert.doesNotMatch(response.body, /private address|private note|objectid/);
+});
+
+test('regional proxy follows bounded ArcGIS pagination without allowing viewport-controlled fields', async () => {
+  const requested = [];
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      const url = new URL(input);
+      requested.push(url);
+      const offset = Number(url.searchParams.get('resultOffset'));
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: Array.from({ length: offset === 0 ? 500 : 1 }, (_, index) => gaPoint({
+          name: `Place ${offset + index}`, feature: 'LOCALITY', authority: 'VIC', auth_id: 'private-id',
+        }, 144.9 + (offset + index) / 100_000)),
+        exceededTransferLimit: offset === 0,
+      });
+    },
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(requested.map((url) => url.searchParams.get('resultOffset')), ['0', '500']);
+  assert.deepEqual(requested.map((url) => url.searchParams.get('resultRecordCount')), ['500', '500']);
+  assert.ok(requested.every((url) => url.searchParams.get('outFields') === 'name,feature,category,theme,authority,supply_date'));
+  assert.equal(JSON.parse(response.body).features.length, 501);
+  assert.doesNotMatch(response.body, /private-id/);
+});
+
+test('regional proxy reports GA partial sublayer failure while retaining successful cohorts', async () => {
+  const middleware = createRegionalProxy({
+    fetchImpl: async (input) => {
+      const layer = Number(new URL(input).pathname.match(/MapServer\/(\d+)\/query$/)?.[1]);
+      if (layer === 1) return regionalResponseJson({ provider: 'secret error' }, 503);
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: [gaPoint({ organisation_name: layer === 0 ? 'Example GP' : 'Example Pharmacy', suburb: 'Melbourne', state: 'VIC' })],
+      });
+    },
+  });
+  const response = await invokeRegional(middleware, `/api/regional/au-health-facilities${MELBOURNE_BOUNDS}`);
+  const cached = await invokeRegional(middleware, `/api/regional/au-health-facilities${MELBOURNE_BOUNDS}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.equal(cached.headers['x-regional-status'], 'degraded');
+  assert.equal(cached.headers['x-regional-cache'], 'HIT');
+  const body = JSON.parse(response.body);
+  assert.equal(body.features.length, 2);
+  assert.equal(body.sourceStatus.status, 'partial');
+  assert.deepEqual(body.sourceStatus.layers.map(({ layer, status }) => [layer, status]), [
+    [0, 'current'], [1, 'unavailable'], [2, 'current'],
+  ]);
+  assert.doesNotMatch(response.body, /secret error/);
+});
+
+test('regional proxy fails closed when every GA sublayer fails or a page exceeds its requested feature cap', async () => {
+  const allFailed = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => regionalResponseJson({ provider: 'secret error' }, 503),
+  }), `/api/regional/au-health-facilities${MELBOURNE_BOUNDS}`);
+  assert.equal(allFailed.status, 502);
+  assert.deepEqual(JSON.parse(allFailed.body), { error: 'regional source is temporarily unavailable' });
+  assert.doesNotMatch(allFailed.body, /secret error/);
+
+  const oversizedPage = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => regionalResponseJson({
+      type: 'FeatureCollection',
+      features: Array.from({ length: 501 }, (_, index) => gaPoint({ name: `Place ${index}` })),
+    }),
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+  assert.equal(oversizedPage.status, 502);
+  assert.deepEqual(JSON.parse(oversizedPage.body), { error: 'regional source returned invalid data' });
+});
+
+test('regional proxy preserves an all-layer GA timeout as a sanitized 504', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    timeoutMs: 10,
+    fetchImpl: async (_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason));
+    }),
+  }), `/api/regional/au-place-names${MELBOURNE_BOUNDS}`);
+  assert.equal(response.status, 504);
+  assert.deepEqual(JSON.parse(response.body), { error: 'regional source timed out' });
 });
 
 test('regional proxy enforces byte cap and isolates parser failures', async () => {

@@ -19,6 +19,9 @@ test('registry declares the approved regional source IDs with immutable source c
     'vic-fire-context',
     'vic-freight-network',
     'au-hydrology',
+    'au-emergency-facilities',
+    'au-health-facilities',
+    'au-place-names',
     'ptv-transit',
     'au-hospital-ed-performance',
   ]);
@@ -31,6 +34,9 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['ptv-transit'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');
   assert.match(REGIONAL_SOURCES['ptv-transit'].endpoint, /opendata\.transport\.vic\.gov\.au\/dataset\/gtfs-realtime/);
   assert.equal(REGIONAL_SOURCES['vic-cfa-alerts'].runtimeEligible, false);
+  assert.equal(REGIONAL_SOURCES['au-emergency-facilities'].runtimeEligible, true);
+  assert.equal(REGIONAL_SOURCES['au-health-facilities'].geometry, 'point');
+  assert.equal(REGIONAL_SOURCES['au-place-names'].credential, 'none');
   assert.ok(Number.isInteger(REGIONAL_SOURCES['melbourne-trees'].maxFeatures));
 });
 
@@ -307,6 +313,23 @@ test('normalizes fire context, freight, hydrology, and Transport Victoria vehicl
   assert.doesNotMatch(JSON.stringify(transit), /provider-entity-secret|provider-vehicle-secret/);
 });
 
+test('delegates GA facility and place-name payloads to their strict source sanitizer', () => {
+  const health = normalizeRegionalFeatureCollection('au-health-facilities', [{
+    layer: 1,
+    payloads: [{ type: 'FeatureCollection', features: [{
+      type: 'Feature', id: 77,
+      geometry: { type: 'Point', coordinates: [144.96, -37.81] },
+      properties: {
+        organisation_name: 'Example Hospital', suburb: 'Melbourne', state: 'VIC',
+        address: 'private address', nhsd_service_id: 'private-id', capacity: 50,
+      },
+    }] }],
+  }]);
+  assert.equal(health.features[0].properties.title, 'Example Hospital');
+  assert.equal(health.features[0].properties.freshnessClass, 'reference');
+  assert.doesNotMatch(JSON.stringify(health), /private address|private-id|capacity/);
+});
+
 test('unknown and inherited source IDs fail closed everywhere', () => {
   for (const sourceId of ['unknown-source', 'toString', 'constructor', '__proto__']) {
     assert.throws(() => normalizeRegionalFeatureCollection(sourceId, {}), new RegExp(`Unknown regional source: ${sourceId}`));
@@ -350,5 +373,8 @@ test('attribution is exact, source-scoped, and rejects unknown IDs', () => {
   assert.equal(regionalSourceAttribution('melbourne-trees'), 'City of Melbourne Open Data');
   assert.equal(regionalSourceAttribution('vic-epa-air'), 'EPA Victoria');
   assert.equal(regionalSourceAttribution('au-hospital-ed-performance'), 'Based on Australian Institute of Health and Welfare material.');
+  assert.match(regionalSourceAttribution('au-emergency-facilities'), /Commonwealth of Australia \(Geoscience Australia\) 2023/);
+  assert.match(regionalSourceAttribution('au-health-facilities'), /G-NAF © Geoscape Australia/);
+  assert.equal(regionalSourceAttribution('au-place-names'), 'Geoscience Australia');
   assert.throws(() => regionalSourceAttribution('nope'), /Unknown regional source: nope/);
 });

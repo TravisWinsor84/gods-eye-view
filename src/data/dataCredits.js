@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { GA_SOURCE_CREDITS } from './gaRegionalSources.js';
 
 /**
  * Per-layer data attribution registered into Cesium's credit display.
@@ -148,6 +149,18 @@ export const DATA_CREDITS = [
   {
     key: 'ptv-transit',
     html: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.',
+  },
+  {
+    key: 'au-emergency-facilities',
+    html: GA_SOURCE_CREDITS['au-emergency-facilities'],
+  },
+  {
+    key: 'au-health-facilities',
+    html: GA_SOURCE_CREDITS['au-health-facilities'],
+  },
+  {
+    key: 'au-place-names',
+    html: GA_SOURCE_CREDITS['au-place-names'],
   },
   // ── Bundled snapshots ───────────────────────────────────────────
   {

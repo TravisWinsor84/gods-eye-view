@@ -1,3 +1,5 @@
+import { GA_SOURCE_CREDITS, normalizeGaRegionalPayload } from './gaRegionalSources.js';
+
 const MAX_TEXT_LENGTH = 512;
 
 function civicDecision(decision) {
@@ -123,6 +125,27 @@ export const REGIONAL_SOURCES = Object.freeze({
     name: 'Australian Hydrology', source: 'Australian Hydrological Geospatial Fabric', publisher: 'Bureau of Meteorology / Geoscience Australia',
     endpoint: 'https://www.bom.gov.au/water/geofabric/', licence: 'Creative Commons Attribution 4.0 International',
     geometry: 'line-or-polygon', refreshMs: 604_800_000, refresh: 'weekly viewport query', credit: 'Bureau of Meteorology / Geoscience Australia', credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'au-emergency-facilities': Object.freeze({
+    name: 'Australian Emergency Management Facilities', source: 'Geoscience Australia', publisher: 'Geoscience Australia',
+    endpoint: 'https://services.ga.gov.au/gis/rest/services/Emergency_Management_Facilities/MapServer',
+    licence: 'Creative Commons Attribution 4.0 International with incorporated G-NAF attribution',
+    geometry: 'point', refreshMs: 86_400_000, refresh: 'daily viewport query; reference inventory only',
+    credit: GA_SOURCE_CREDITS['au-emergency-facilities'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'au-health-facilities': Object.freeze({
+    name: 'Australian Health Facilities', source: 'Geoscience Australia / Healthdirect', publisher: 'Geoscience Australia',
+    endpoint: 'https://services.ga.gov.au/gis/rest/services/National_HealthDirect_Health_Facilities/MapServer',
+    licence: 'Live GA service: Creative Commons Attribution 4.0 International with incorporated G-NAF attribution; Data.gov catalogue licence is unspecified',
+    geometry: 'point', refreshMs: 86_400_000, refresh: 'daily viewport query; periodic reference directory',
+    credit: GA_SOURCE_CREDITS['au-health-facilities'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+  }),
+  'au-place-names': Object.freeze({
+    name: 'Composite Gazetteer of Australia', source: 'Geoscience Australia', publisher: 'Geoscience Australia',
+    endpoint: 'https://services.ga.gov.au/gis/rest/services/Composite_Gazetteer_of_Australia/MapServer',
+    licence: 'Geoscience Australia service attribution; compiled reference data',
+    geometry: 'point', refreshMs: 604_800_000, refresh: 'weekly viewport query; compiled reference data',
+    credit: GA_SOURCE_CREDITS['au-place-names'], credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
   }),
   'ptv-transit': Object.freeze({
     name: 'Transport Victoria Realtime Transit', source: 'Transport Victoria Open Data Portal', publisher: 'Public Transport Victoria',
@@ -433,6 +456,9 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   if (!source.runtimeEligible) throw new Error(`${sourceId} is not runtime eligible: restricted source terms`);
   let features;
   if (['melbourne-trees', 'melbourne-places'].includes(sourceId)) features = recordFeatures(sourceId, payload, source.maxFeatures);
+  else if (['au-emergency-facilities', 'au-health-facilities', 'au-place-names'].includes(sourceId)) {
+    return normalizeGaRegionalPayload(sourceId, payload);
+  }
   else if (sourceId === 'ptv-transit') features = ptvFeatures(payload, source.maxFeatures);
   else if (sourceId === 'au-hospital-ed-performance') features = aihwFeatures(source, payload);
   else features = geoJsonFeatures(source, payload, source.maxFeatures);

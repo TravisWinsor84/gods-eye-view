@@ -60,6 +60,9 @@ only after its authenticated contract has been validated.
 | `vic-fire-context` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Polygon or line | Daily viewport query |
 | `vic-freight-network` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Line or point | Daily viewport query |
 | `au-hydrology` | Bureau of Meteorology / Geoscience Australia, [Australian Hydrological Geospatial Fabric](https://www.bom.gov.au/water/geofabric/) | Creative Commons Attribution 4.0 International, subject to the selected service/dataset listing | `Bureau of Meteorology / Geoscience Australia` | Line or polygon | Weekly viewport query |
+| `au-emergency-facilities` | Geoscience Australia, [Emergency Management Facilities ArcGIS service](https://services.ga.gov.au/gis/rest/services/Emergency_Management_Facilities/MapServer) | Creative Commons Attribution 4.0 International; incorporates G-NAF under the G-NAF End User Licence Agreement | `© Commonwealth of Australia (Geoscience Australia) 2023. This material is released under the Creative Commons Attribution 4.0 International Licence. Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.` | Point | Implemented registry, sanitizer and daily viewport proxy; not assigned to a visible category pack until Task 6 |
+| `au-health-facilities` | Geoscience Australia / Healthdirect, [National HealthDirect Health Facilities ArcGIS service](https://services.ga.gov.au/gis/rest/services/National_HealthDirect_Health_Facilities/MapServer) | The live service states Creative Commons Attribution 4.0 International and incorporated G-NAF terms; the Data.gov catalogue licence remains unspecified | `© Commonwealth of Australia (Geoscience Australia) 2025`<br>`This material is released under the Creative Commons Attribution 4.0 International Licence.`<br><br>`Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.` | Point | Implemented registry, sanitizer and daily viewport proxy; periodic reference directory, not assigned to a visible category pack until Task 6 |
+| `au-place-names` | Geoscience Australia, [Composite Gazetteer of Australia ArcGIS service](https://services.ga.gov.au/gis/rest/services/Composite_Gazetteer_of_Australia/MapServer) | Service attribution: Geoscience Australia; compiled reference data | `Geoscience Australia` | Point | Implemented registry, sanitizer and weekly viewport proxy; not assigned to a visible category pack until Task 6 |
 | `ptv-transit` | Public Transport Victoria, [Transport Victoria Open Data Portal GTFS Realtime](https://opendata.transport.vic.gov.au/dataset/gtfs-realtime) | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/); one Open Data Portal key is required server-side | `Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.` | Point (vehicle positions) | Metro, tram, bus and V/Line provider snapshots cached globally by mode for at least 30 seconds; bbox filtering occurs after decode |
 | `au-hospital-ed-performance` | Australian Institute of Health and Welfare, [MyHospitals API](https://www.aihw.gov.au/hospitals/other-resources/myhospitals-api) | [CC BY 4.0](https://www.aihw.gov.au/copyright); no credentials | `Based on Australian Institute of Health and Welfare material.` | Point (hospital reporting units) | 24-hour application cache; release-cycle historical data |
 
@@ -69,6 +72,20 @@ demand, capacity, ambulance-offload, medical-routing or treatment-forecast
 source. Every normalized datum keeps its official link, reporting period, API
 freshness metadata, caveats and error state. Suppressed values are marked but
 never emitted as numbers. This registration does not add a proxy, layer or UI.
+
+The three GA ArcGIS sources are reference inventories, not operational feeds.
+Their server-owned requests use only fixed service/layer IDs, an envelope bbox
+in EPSG:4326, fixed public field lists, at most two 500-feature pages per
+sublayer, a 1,000-feature normalized cap and the regional proxy's one-megabyte
+per-response cap. Emergency facilities never imply staffing, readiness,
+response time or ambulance availability. Health facilities never imply current
+opening, clinical suitability, capacity, medicine stock, ED waits or medical
+advice. Place names are compiled reference labels and are not navigation data.
+The sanitizer omits provider object IDs, G-NAF address IDs, Healthdirect service
+IDs, authority IDs, comments, contacts and full street addresses. Partial
+sublayer failures are returned as degraded source status without exposing
+provider errors. These routes are implemented but are not visible in a category
+layer or pack until the explicit Task 6 integration.
 
 `vic-epa-air` is deliberately fail-closed. The previously recorded URL was an
 information page, not a supported API endpoint, and the guessed gateway route
@@ -215,4 +232,4 @@ Douglas-Peucker simplification, 6-decimal rounding).
 
 ## In-app attribution
 
-The required Google Maps / Cesium credit renders on the on-globe credit line (`#cesium-credits`, bottom-left) and must stay visible — including in clean-view and recording modes (the whole line, logo + "Google Maps" + the "Data attribution" link, stays on screen; only the GEV panels/HUD fade). The layer-specific credits (adsb.lol, TeleGeography, OSM datacenters/dams/roads, NASA FIRMS, CelesTrak, USGS, City of Austin, GBFS, Radio Browser, OpenSky, AISStream, Public Transport Victoria) are registered into the expandable **"Data attribution"** popover on that credit line via `viewer.creditDisplay.addStaticCredit(new Cesium.Credit(html, /* showOnScreen */ false))` — see `src/data/dataCredits.js`. When you add a new data source, add its license and attribution to this file **and** append an entry to `DATA_CREDITS` in `src/data/dataCredits.js` so it surfaces in the app.
+The required Google Maps / Cesium credit renders on the on-globe credit line (`#cesium-credits`, bottom-left) and must stay visible — including in clean-view and recording modes (the whole line, logo + "Google Maps" + the "Data attribution" link, stays on screen; only the GEV panels/HUD fade). The layer-specific credits (adsb.lol, TeleGeography, OSM datacenters/dams/roads, NASA FIRMS, CelesTrak, USGS, City of Austin, GBFS, Radio Browser, OpenSky, AISStream, Public Transport Victoria, Geoscience Australia and incorporated G-NAF material) are registered into the expandable **"Data attribution"** popover on that credit line via `viewer.creditDisplay.addStaticCredit(new Cesium.Credit(html, /* showOnScreen */ false))` — see `src/data/dataCredits.js`. When you add a new data source, add its license and attribution to this file **and** append an entry to `DATA_CREDITS` in `src/data/dataCredits.js` so it surfaces in the app.

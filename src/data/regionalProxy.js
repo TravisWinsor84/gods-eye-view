@@ -1,4 +1,5 @@
 import { REGIONAL_SOURCES, normalizeRegionalFeatureCollection, regionalSourceAvailability } from './regionalSources.js';
+import { gaArcGisRequests } from './gaRegionalSources.js';
 import { createTransportVicGtfs } from './transportVicGtfs.js';
 
 const MAX_CACHE_ENTRIES = 64;
@@ -8,6 +9,10 @@ const MAX_BOUNDS_WIDTH = 10;
 // callers still coalesce, and an expired last-good entry can still be served.
 const MAX_CONCURRENT_UPSTREAM_REFRESHES = 4;
 const ALLOWED_QUERY_KEYS = new Set(['west', 'south', 'east', 'north']);
+const GA_SOURCE_IDS = new Set(['au-emergency-facilities', 'au-health-facilities', 'au-place-names']);
+const MAX_GA_PAGES_PER_LAYER = 2;
+const GA_TIMEOUT_MS = 20_000;
+const GA_GAZETTEER_TIMEOUT_MS = 30_000;
 
 // These are server-owned query templates. They are deliberately separate from
 // the catalogue: the browser supplies only an approved source ID and a bbox.
@@ -162,6 +167,67 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
   let activeRefreshes = 0;
 
   async function refresh(sourceId, source, bbox) {
+    if (GA_SOURCE_IDS.has(sourceId)) {
+      const initialRequests = gaArcGisRequests(sourceId, bbox, source.maxFeatures);
+      const layerResults = await Promise.all(initialRequests.map(async (initialRequest) => {
+        let request = initialRequest;
+        let featureCount = 0;
+        const payloads = [];
+        try {
+          for (let page = 0; page < MAX_GA_PAGES_PER_LAYER; page += 1) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => {
+              const error = new Error('timeout');
+              error.code = 'TIMEOUT';
+              controller.abort(error);
+            }, timeoutMs ?? (sourceId === 'au-place-names' ? GA_GAZETTEER_TIMEOUT_MS : GA_TIMEOUT_MS));
+            let payload;
+            try {
+              const response = await fetchImpl(request.url, {
+                method: 'GET', headers: { Accept: 'application/geo+json, application/json' }, signal: controller.signal, redirect: 'error',
+              });
+              if (!response?.ok) throw new Error('upstream failed');
+              payload = await readJsonCapped(response, MAX_RESPONSE_BYTES);
+            } finally {
+              clearTimeout(timer);
+            }
+            if (!Array.isArray(payload?.features) || payload.features.length > request.requestedCount) {
+              const error = new Error('invalid GA response');
+              error.code = 'INVALID_GA_RESPONSE';
+              throw error;
+            }
+            payloads.push(payload);
+            featureCount += payload.features.length;
+            if (payload.exceededTransferLimit !== true) {
+              return { layer: request.layer, payloads };
+            }
+            if (featureCount >= source.maxFeatures || payload.features.length === 0) {
+              return { layer: request.layer, payloads, truncated: true };
+            }
+            request = request.nextPage(featureCount, source.maxFeatures - featureCount);
+          }
+          return { layer: request.layer, payloads, truncated: true };
+        } catch (error) {
+          return { layer: initialRequest.layer, error };
+        }
+      }));
+      if (layerResults.every((result) => result.error)) {
+        const invalid = layerResults.find((result) => result.error?.code === 'INVALID_GA_RESPONSE');
+        if (invalid) throw invalid.error;
+        const oversized = layerResults.find((result) => result.error?.code === 'RESPONSE_TOO_LARGE');
+        if (oversized) throw oversized.error;
+        const timedOut = layerResults.find((result) => result.error?.code === 'TIMEOUT' || result.error?.name === 'AbortError');
+        if (timedOut) {
+          const error = new Error('all GA layers timed out');
+          error.code = 'TIMEOUT';
+          throw error;
+        }
+        const error = new Error('all GA layers failed');
+        error.code = 'ALL_GA_LAYERS_FAILED';
+        throw error;
+      }
+      return normalizeRegionalFeatureCollection(sourceId, layerResults);
+    }
     const transport = SOURCE_TRANSPORT[sourceId];
     if (!transport) throw new Error('source unavailable');
     const controller = new AbortController();
@@ -222,7 +288,12 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     const key = cacheKey(sourceId, bbox);
     const existing = cache.get(key);
     if (existing && now() - existing.cachedAt < source.refreshMs) {
-      return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'fresh', 'X-Regional-Cache': 'HIT' });
+      const sourceStatus = existing.body?.sourceStatus?.status;
+      return sendJson(res, 200, existing.body, {
+        'X-Regional-Source': sourceId,
+        'X-Regional-Status': sourceStatus && sourceStatus !== 'current' ? 'degraded' : 'fresh',
+        'X-Regional-Cache': 'HIT',
+      });
     }
     let pending = inFlight.get(key);
     if (!pending) {
@@ -244,11 +315,16 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     }
     try {
       const body = await pending;
-      return sendJson(res, 200, body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'fresh', 'X-Regional-Cache': 'MISS' });
+      const sourceStatus = body?.sourceStatus?.status;
+      return sendJson(res, 200, body, {
+        'X-Regional-Source': sourceId,
+        'X-Regional-Status': sourceStatus && sourceStatus !== 'current' ? 'degraded' : 'fresh',
+        'X-Regional-Cache': 'MISS',
+      });
     } catch (error) {
       if (existing) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
       if (error?.code === 'RESPONSE_TOO_LARGE') return sendJson(res, 502, { error: 'regional source response was too large' });
-      if (error?.code === 'INVALID_JSON' || error?.message === 'source unavailable') return sendJson(res, 502, { error: 'regional source returned invalid data' });
+      if (error?.code === 'INVALID_JSON' || error?.code === 'INVALID_GA_RESPONSE' || error?.message === 'source unavailable') return sendJson(res, 502, { error: 'regional source returned invalid data' });
       // Normalizer errors are intentionally collapsed with malformed payloads.
       if (error?.message?.includes('payload must contain') || error?.message?.includes('Unknown regional source')) {
         return sendJson(res, 502, { error: 'regional source returned invalid data' });
