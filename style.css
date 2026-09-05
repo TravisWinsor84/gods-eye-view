@@ -9534,6 +9534,7 @@ body.scene-playback-mode #key-setup {
   box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.42);
   backdrop-filter: blur(20px) saturate(1.2);
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  pointer-events: auto;
 }
 
 .map-context-bearing {
@@ -9673,21 +9674,22 @@ body.scene-playback-mode #key-setup {
 
 @media (max-width: 720px) {
   #map-context-card {
-    right: max(0.75rem, env(safe-area-inset-right));
-    bottom: calc(7.75rem + env(safe-area-inset-bottom));
-    left: max(0.75rem, env(safe-area-inset-left));
-    width: auto;
+    position: sticky;
+    top: 0;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    z-index: 1;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    order: 0;
+    width: 100%;
     padding: 0.62rem 0.68rem 0.58rem;
+    pointer-events: auto;
   }
 
   .map-context-bearing strong { font-size: 0.84rem; }
-  .map-context-details { max-height: 30vh; }
-
-  body:has(#command-dock #location-bar:not(.collapsed)) #map-context-card,
-  body:has(#command-dock #control-panel:not(.collapsed)) #map-context-card {
-    top: 11.75rem;
-    bottom: auto;
-  }
+  .map-context-details { max-height: min(9rem, 15vh); }
 }
 
 @media (prefers-reduced-motion: reduce) {

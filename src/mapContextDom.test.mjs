@@ -76,6 +76,33 @@ test('buildMapContextFromUiState projects preset, POI, layers, and finite bearin
   assert.equal(context.heading, 184.4);
 });
 
+test('buildMapContextFromUiState includes the active CCTV camera only while CCTV is enabled', () => {
+  const activeCctvCamera = {
+    name: 'Collins Street camera',
+    headingDeg: 5,
+    pitchDeg: -18,
+    sourceLabel: 'City of Melbourne traffic cameras',
+    sourceStatus: 'ok',
+  };
+
+  const enabled = buildMapContextFromUiState({
+    enabledLayers: ['cctv'],
+    cctvEnabled: true,
+    activeCctvCamera,
+  });
+  assert.match(enabled.explanation, /Camera: Collins Street camera/);
+  assert.match(enabled.explanation, /— north,/i);
+  assert.match(enabled.sourceSummary, /1 active overlay/);
+  assert.match(enabled.sourceSummary, /City of Melbourne traffic cameras · current/);
+
+  const disabled = buildMapContextFromUiState({
+    cctvEnabled: false,
+    activeCctvCamera,
+  });
+  assert.equal(disabled.explanation, 'Map orientation context');
+  assert.equal(disabled.sourceSummary, 'No active source provenance');
+});
+
 test('buildMapContextFromUiState uses free-text search labels without inventing coordinates', () => {
   const context = buildMapContextFromUiState({
     searchedLabel: 'Melbourne VIC, Australia',
@@ -166,7 +193,12 @@ test('a hierarchy row is omitted when it only repeats the title', () => {
 });
 
 test('unsafe or absent official links are removed from the card', () => {
-  for (const officialUrl of ['javascript:alert(1)', 'http://example.com/', null]) {
+  for (const officialUrl of [
+    'javascript:alert(1)',
+    'http://example.com/',
+    'https://attacker.example/phish',
+    null,
+  ]) {
     const root = makeRoot();
     root.elements['[data-map-context-link]'].setAttribute('href', 'https://old.example/');
     renderMapContext(root, { ...resolvedContext, officialUrl });

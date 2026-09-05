@@ -13,6 +13,8 @@ function officialUrl(value) {
   try {
     const url = new URL(value.trim());
     if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) return null;
+    const hostname = url.hostname.toLowerCase();
+    if (hostname !== 'gov.au' && !hostname.endsWith('.gov.au')) return null;
     return url.href;
   } catch {
     return null;
@@ -61,7 +63,18 @@ export function buildMapContextFromUiState({
   cameraHeading = null,
   enabledLayers = [],
   sources = [],
+  cctvEnabled = false,
+  activeCctvCamera = null,
 } = {}) {
+  const cctvHeadingDegrees = activeCctvCamera?.headingDeg ?? activeCctvCamera?.headingDegrees;
+  const cctvPitchDegrees = activeCctvCamera?.pitchDeg ?? activeCctvCamera?.pitchDegrees;
+  const camera = cctvEnabled && activeCctvCamera
+    ? {
+      label: activeCctvCamera.name ?? activeCctvCamera.label ?? activeCctvCamera.id,
+      heading: Number.isFinite(cctvHeadingDegrees) ? cctvHeadingDegrees * Math.PI / 180 : null,
+      pitch: Number.isFinite(cctvPitchDegrees) ? cctvPitchDegrees * Math.PI / 180 : null,
+    }
+    : null;
   const location = city
     ? {
       ...city,
@@ -70,7 +83,7 @@ export function buildMapContextFromUiState({
       longitude: currentPoi?.lon ?? currentPoi?.lng,
     }
     : { name: searchedLabel };
-  const selection = currentPoi
+  const selection = currentPoi && !camera
     ? {
       label: currentPoi.name,
       type: currentPoi.type ?? currentPoi.kind ?? 'landmark',
@@ -81,12 +94,21 @@ export function buildMapContextFromUiState({
     : null;
   const hasHeading = Number.isFinite(cameraHeading);
   const heading = hasHeading ? cameraHeading : null;
+  const sourceList = Array.isArray(sources) ? sources : [];
+  const cameraSource = camera
+    ? [{
+      name: activeCctvCamera.sourceLabel ?? activeCctvCamera.provider ?? 'Configured CCTV source',
+      status: activeCctvCamera.sourceStatus,
+      reason: activeCctvCamera.sourceMessage,
+      officialUrl: activeCctvCamera.officialUrl,
+    }]
+    : [];
   const context = buildMapContext({
     location,
     selection,
-    camera: hasHeading ? { headingDegrees: heading } : null,
+    camera: camera ?? (hasHeading ? { headingDegrees: heading } : null),
     enabledLayers: Array.isArray(enabledLayers) ? enabledLayers : [...enabledLayers],
-    sources,
+    sources: [...sourceList, ...cameraSource],
   });
   return hasHeading ? { ...context, heading } : context;
 }

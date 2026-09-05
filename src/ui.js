@@ -6657,6 +6657,7 @@ export class StyleManager {
     }
 
     this._syncCctvSourceBadge(activeCamera, enabled);
+    this._updateMapContext();
     this._typeCctvSummary(state?.summary || 'Enable CCTV to start camera-linked intelligence summaries.');
   }
 
@@ -9581,6 +9582,8 @@ export class StyleManager {
       cameraHeading,
       enabledLayers: this._dataManager?.getEnabledLayerIds?.() || [],
       sources: [],
+      cctvEnabled: !!this._cctvState?.enabled && !!this._dataManager?.isEnabled?.('cctv'),
+      activeCctvCamera: this._cctvState?.activeCamera || null,
     });
     renderMapContext(this._mapContextCard, context);
   }
