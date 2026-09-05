@@ -171,7 +171,6 @@ function unavailableError(error) {
 export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, melbourneCivicClient, env = process.env } = {}) {
   const cache = new Map();
   const inFlight = new Map();
-  const transportClient = transportVicGtfs || createTransportVicGtfs({ fetchImpl, now, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
   let activeRefreshes = 0;
   let activeProviderRequests = 0;
   const providerRequestWaiters = [];
@@ -190,6 +189,12 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
       else activeProviderRequests -= 1;
     }
   }
+  const transportClient = transportVicGtfs || createTransportVicGtfs({
+    fetchImpl,
+    now,
+    requestRunner: withProviderRequestSlot,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
   const civicClient = melbourneCivicClient || createMelbourneCivicClient({
     fetchImpl,
     now,

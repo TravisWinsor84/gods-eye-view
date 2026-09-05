@@ -6,6 +6,9 @@ const DEFAULT_SPATIAL_REQUESTS = 12;
 const PARKING_CACHE_MS = 120_000;
 const PARKING_STALE_MS = 5 * 60_000;
 const PARKING_LAST_GOOD_MS = 10 * 60_000;
+const MEMORIAL_EXPORT_CACHE_MS = 6 * 60 * 60_000;
+const MEMORIAL_EXPORT_MAX_BYTES = 2 * 1024 * 1024;
+const MEMORIAL_EXPORT_MAX_ROWS = 2_000;
 
 export const CITY_OF_MELBOURNE_CREDIT = 'City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.';
 
@@ -13,33 +16,40 @@ const SPATIAL_DATASETS = Object.freeze({
   'melbourne-drinking-fountains': Object.freeze([Object.freeze({
     dataset: 'drinking-fountains',
     geometryField: 'geo_point_2d',
-    select: 'type,evaluationdate,geo_point_2d',
+    select: 'assetid,type,evaluationdate,geo_point_2d',
     orderBy: 'assetid',
+    rowKey: 'assetid',
   })]),
   'melbourne-barbecues': Object.freeze([Object.freeze({
     dataset: 'public-barbecues',
     geometryField: 'geo_point_2d',
-    select: 'type,evaluationdate,geo_point_2d',
+    select: 'assetid,type,evaluationdate,geo_point_2d',
     orderBy: 'assetid',
+    rowKey: 'assetid',
   })]),
   'melbourne-development': Object.freeze([Object.freeze({
     dataset: 'development-activity-monitor',
     geometryField: 'geopoint',
-    select: 'status,year_completed,clue_small_area,floors_above,resi_dwellings,hotel_rooms,geopoint',
+    select: 'development_key,status,year_completed,clue_small_area,floors_above,resi_dwellings,hotel_rooms,geopoint',
     orderBy: 'development_key',
+    rowKey: 'development_key',
   })]),
   'melbourne-culture': Object.freeze([
     Object.freeze({
       dataset: 'outdoor-artworks',
       geometryField: 'geo_point_2d',
-      select: 'title,object_type,classification,art_date,geo_point_2d',
+      select: 'asset_id,title,object_type,classification,art_date,geo_point_2d',
       orderBy: 'asset_id',
+      rowKey: 'asset_id',
     }),
     Object.freeze({
       dataset: 'public-memorials-and-sculptures',
       geometryField: 'co_ordinates',
       select: 'title,co_ordinates',
-      orderBy: 'title,description',
+      orderBy: '',
+      transport: 'export',
+      maxBytes: MEMORIAL_EXPORT_MAX_BYTES,
+      maxRows: MEMORIAL_EXPORT_MAX_ROWS,
     }),
   ]),
 });
@@ -84,15 +94,37 @@ function stableHash(value) {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
+function boundedDigest(value) {
+  return [0x811c9dc5, 0x9e3779b9, 0x85ebca6b]
+    .map((seed) => {
+      let hash = seed >>> 0;
+      for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+      }
+      return hash.toString(16).padStart(8, '0');
+    })
+    .join('');
+}
+
+function canonicalValue(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalValue).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalValue(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sourceRowIdentity(sourceId, dataset, row, coordinates) {
+  const config = SPATIAL_DATASETS[sourceId]?.find((candidate) => candidate.dataset === dataset);
+  const opaqueKey = config?.rowKey ? cleanText(String(row?.[config.rowKey] ?? ''), 180) : '';
+  if (opaqueKey) return `${dataset}|key|${opaqueKey}`;
+  return `${dataset}|fallback|${canonicalValue(row)}|${coordinates.join(',')}`;
+}
+
 function featureId(sourceId, dataset, row, coordinates) {
-  const publicIdentity = [
-    sourceId,
-    dataset,
-    cleanText(row?.title || row?.type || row?.clue_small_area || row?.description, 120),
-    coordinates[0].toFixed(6),
-    coordinates[1].toFixed(6),
-  ].join('|');
-  return `${sourceId}-${stableHash(publicIdentity)}`;
+  const internalIdentity = sourceRowIdentity(sourceId, dataset, row, coordinates);
+  return `${sourceId}-${boundedDigest(`${sourceId}|${internalIdentity}`)}`;
 }
 
 function feature(sourceId, dataset, row, coordinates, properties) {
@@ -107,6 +139,51 @@ function feature(sourceId, dataset, row, coordinates, properties) {
 function inBounds(coordinates, bbox) {
   return coordinates[0] >= bbox.west && coordinates[0] <= bbox.east
     && coordinates[1] >= bbox.south && coordinates[1] <= bbox.north;
+}
+
+function buildSpatialRowIndex(sourceId, dataset, rows) {
+  const cells = new Map();
+  const indexed = [];
+  const seen = new Set();
+  let duplicates = 0;
+  for (const row of rows) {
+    const normalized = normalizeMelbourneCivicRecord(sourceId, row, { dataset });
+    if (!normalized) continue;
+    const entry = {
+      row,
+      coordinates: normalized.geometry.coordinates,
+      identity: sourceRowIdentity(sourceId, dataset, row, normalized.geometry.coordinates),
+    };
+    if (seen.has(entry.identity)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(entry.identity);
+    indexed.push(entry);
+  }
+  indexed.sort((left, right) => left.identity.localeCompare(right.identity));
+  for (const entry of indexed) {
+    const key = parkingCell(entry.coordinates);
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(entry);
+  }
+  return { cells, duplicates };
+}
+
+function querySpatialRowIndex(index, bbox) {
+  const rows = [];
+  const westCell = Math.floor(bbox.west / PARKING_INDEX_CELL_DEGREES);
+  const eastCell = Math.floor(bbox.east / PARKING_INDEX_CELL_DEGREES);
+  const southCell = Math.floor(bbox.south / PARKING_INDEX_CELL_DEGREES);
+  const northCell = Math.floor(bbox.north / PARKING_INDEX_CELL_DEGREES);
+  for (let x = westCell; x <= eastCell; x += 1) {
+    for (let y = southCell; y <= northCell; y += 1) {
+      for (const entry of index.cells.get(`${x},${y}`) || []) {
+        if (inBounds(entry.coordinates, bbox)) rows.push(entry);
+      }
+    }
+  }
+  return rows.sort((left, right) => left.identity.localeCompare(right.identity)).map(({ row }) => row);
 }
 
 function pageUrl(dataset, { select, where = '', offset = 0, limit = DEFAULT_PAGE_ROWS, orderBy = '' } = {}) {
@@ -136,12 +213,14 @@ export function melbourneCivicSpatialRequests(sourceId, bbox, maxFeatures) {
   const limit = Math.min(DEFAULT_PAGE_ROWS, Math.max(1, Number(maxFeatures) || DEFAULT_PAGE_ROWS));
   return configs.map((config) => ({
     ...config,
-    url: pageUrl(config.dataset, {
-      select: config.select,
-      where: `in_bbox(${config.geometryField}, ${bbox.south}, ${bbox.west}, ${bbox.north}, ${bbox.east})`,
-      limit,
-      orderBy: config.orderBy,
-    }),
+    url: config.transport === 'export'
+      ? exportUrl(config.dataset, { select: config.select })
+      : pageUrl(config.dataset, {
+        select: config.select,
+        where: `in_bbox(${config.geometryField}, ${bbox.south}, ${bbox.west}, ${bbox.north}, ${bbox.east})`,
+        limit,
+        orderBy: config.orderBy,
+      }),
   }));
 }
 
@@ -336,11 +415,27 @@ export function normalizeMelbourneCivicPayload(sourceId, payload, { nowMs = Date
   }
   const datasets = Array.isArray(payload) ? payload : [{ dataset: SPATIAL_DATASETS[sourceId]?.[0]?.dataset, results: payload?.results }];
   const features = [];
+  const identities = new Set();
+  const publicIdOwners = new Map();
   for (const item of datasets) {
     if (!Array.isArray(item?.results)) throw new Error(`${sourceId} payload must contain results arrays`);
     for (const row of item.results) {
       const normalized = normalizeMelbourneCivicRecord(sourceId, row, { dataset: item.dataset });
-      if (normalized) features.push(normalized);
+      if (normalized) {
+        const identity = sourceRowIdentity(sourceId, item.dataset, row, normalized.geometry.coordinates);
+        if (identities.has(identity)) continue;
+        identities.add(identity);
+        const originalId = normalized.id;
+        let candidateId = originalId;
+        let collision = 0;
+        while (publicIdOwners.has(candidateId) && publicIdOwners.get(candidateId) !== identity) {
+          collision += 1;
+          candidateId = `${originalId}-${boundedDigest(`collision|${collision}|${identity}`).slice(0, 8)}`;
+        }
+        normalized.id = candidateId;
+        publicIdOwners.set(candidateId, identity);
+        features.push(normalized);
+      }
       if (features.length >= maxFeatures) return { type: 'FeatureCollection', features };
     }
   }
@@ -413,6 +508,8 @@ export function createMelbourneCivicClient({
   const spatialRequestCap = Math.max(1, Number(limits.spatialRequests) || DEFAULT_SPATIAL_REQUESTS);
   let parkingCache = null;
   let parkingInFlight = null;
+  const spatialExportCache = new Map();
+  const spatialExportInFlight = new Map();
 
   async function fetchPage(url, meter, responseBytes = pageBytes) {
     return withRequestSlot(async () => {
@@ -531,6 +628,56 @@ export function createMelbourneCivicClient({
     const initial = melbourneCivicSpatialRequests(sourceId, bbox, maxFeatures);
     const meter = { bytes: 0, maxBytes: totalBytes };
     const datasetResults = await Promise.all(initial.map(async (request) => {
+      if (request.transport === 'export') {
+        try {
+          let snapshot = spatialExportCache.get(request.dataset);
+          if (!snapshot || now() - snapshot.cachedAt >= MEMORIAL_EXPORT_CACHE_MS) {
+            let pending = spatialExportInFlight.get(request.dataset);
+            if (!pending) {
+              pending = (async () => {
+                const payload = await fetchPage(request.url, meter, request.maxBytes);
+                if (!Array.isArray(payload)) {
+                  const invalid = new Error('invalid provider response');
+                  invalid.code = 'INVALID_JSON';
+                  throw invalid;
+                }
+                const capped = payload.length > request.maxRows;
+                const rows = payload.slice(0, request.maxRows);
+                return {
+                  rows,
+                  index: buildSpatialRowIndex(sourceId, request.dataset, rows),
+                  capped,
+                  cachedAt: now(),
+                };
+              })().finally(() => spatialExportInFlight.delete(request.dataset));
+              spatialExportInFlight.set(request.dataset, pending);
+            }
+            snapshot = await pending;
+            spatialExportCache.set(request.dataset, snapshot);
+          }
+          const rows = querySpatialRowIndex(snapshot.index, bbox);
+          return {
+            dataset: request.dataset,
+            results: rows,
+            status: snapshot.capped || snapshot.index.duplicates > 0 ? 'partial' : 'current',
+            capped: snapshot.capped || snapshot.index.duplicates > 0,
+            duplicates: snapshot.index.duplicates,
+            failed: false,
+            export: true,
+          };
+        } catch (error) {
+          return {
+            dataset: request.dataset,
+            results: [],
+            status: 'partial',
+            capped: false,
+            duplicates: 0,
+            failed: true,
+            error,
+            export: true,
+          };
+        }
+      }
       const rows = [];
       const seen = new Set();
       let duplicates = 0;
@@ -554,7 +701,8 @@ export function createMelbourneCivicClient({
           totalCount = payload.total_count;
           for (const row of payload.results) {
             const normalized = normalizeMelbourneCivicRecord(sourceId, row, { dataset: request.dataset });
-            const identity = normalized?.id || stableHash(JSON.stringify(row));
+            const coordinates = normalized?.geometry?.coordinates || [0, 0];
+            const identity = sourceRowIdentity(sourceId, request.dataset, row, coordinates);
             if (seen.has(identity)) duplicates += 1;
             else {
               seen.add(identity);

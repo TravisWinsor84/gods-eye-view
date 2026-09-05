@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
 import createViteConfig, {
   adsbLolFallbackAnchor,
   coalesceProxyRequest,
@@ -48,6 +49,14 @@ function invokeRegional(middleware, url, { method = 'GET' } = {}) {
 }
 
 const MELBOURNE_BOUNDS = '?west=144.9&south=-37.9&east=145.0&north=-37.8';
+const { transit_realtime: transitRealtime } = GtfsRealtimeBindings;
+
+function regionalTransitFeed() {
+  return transitRealtime.FeedMessage.encode({
+    header: { gtfsRealtimeVersion: '2.0', timestamp: 1_800_000_000 },
+    entity: [],
+  }).finish();
+}
 
 test('regional proxy rejects unknown IDs before fetch', async () => {
   let fetchCalls = 0;
@@ -544,6 +553,7 @@ test('regional proxy shares four actual request slots across GA and civic fan-ou
         if (url.hostname === 'services.ga.gov.au') {
           return regionalResponseJson({ type: 'FeatureCollection', features: [] });
         }
+        if (url.pathname.endsWith('/exports/json')) return regionalResponseJson([]);
         return regionalResponseJson({ total_count: 0, results: [] });
       } finally {
         active -= 1;
@@ -562,6 +572,51 @@ test('regional proxy shares four actual request slots across GA and civic fan-ou
   const recovered = await invokeRegional(middleware, '/api/regional/melbourne-culture?west=145.2&south=-37.9&east=145.3&north=-37.8');
   assert.equal(recovered.status, 200);
   assert.ok(maxActive <= 4);
+});
+
+test('regional proxy shares four provider slots across PTV body reads and GA or civic fan-out', async () => {
+  let active = 0;
+  let maxActive = 0;
+  const apiKey = process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+  process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = 'secret-value';
+  try {
+    const middleware = createRegionalProxy({
+      fetchImpl: async (input) => {
+        const url = new URL(input);
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 3));
+        if (url.hostname === 'api.opendata.transport.vic.gov.au') {
+          const bytes = regionalTransitFeed();
+          return new Response(new ReadableStream({
+            async start(controller) {
+              await new Promise((resolve) => setTimeout(resolve, 3));
+              controller.enqueue(bytes);
+              controller.close();
+              active -= 1;
+            },
+          }), { status: 200, headers: { 'Content-Type': 'application/x-protobuf' } });
+        }
+        active -= 1;
+        return url.hostname === 'services.ga.gov.au'
+          ? regionalResponseJson({ type: 'FeatureCollection', features: [] })
+          : url.pathname.endsWith('/exports/json')
+            ? regionalResponseJson([])
+          : regionalResponseJson({ total_count: 0, results: [] });
+      },
+    });
+    const responses = await Promise.all([
+      invokeRegional(middleware, `/api/regional/ptv-transit${MELBOURNE_BOUNDS}`),
+      invokeRegional(middleware, `/api/regional/au-emergency-facilities${MELBOURNE_BOUNDS}`),
+      invokeRegional(middleware, `/api/regional/melbourne-culture${MELBOURNE_BOUNDS}`),
+    ]);
+    assert.deepEqual(responses.map(({ status }) => status), [200, 200, 200]);
+    assert.ok(maxActive <= 4, `expected at most four actual provider requests, observed ${maxActive}`);
+    assert.equal(active, 0);
+  } finally {
+    if (apiKey === undefined) delete process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+    else process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = apiKey;
+  }
 });
 
 test('regional proxy enforces byte cap and isolates parser failures', async () => {

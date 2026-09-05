@@ -74,6 +74,30 @@ test('uses exactly four current vehicle-position endpoints and sends the key onl
   }
 });
 
+test('request runner owns fetch and complete body consumption and releases after failures', async () => {
+  let active = 0;
+  let maxActive = 0;
+  let runnerCalls = 0;
+  const transport = client(async (url) => {
+    const mode = new URL(url).pathname.split('/').at(-2);
+    if (mode === 'tram') return new Response('failed', { status: 500 });
+    return protobufResponse(feed({ entities: [vehicle(mode, 144.9, -37.8)] }));
+  }, {
+    requestRunner: async (operation) => {
+      runnerCalls += 1;
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      try { return await operation(); } finally { active -= 1; }
+    },
+  });
+
+  const result = await transport.load({ bbox: BBOX_WEST, apiKey: 'key', maxFeatures: 100 });
+  assert.equal(runnerCalls, 4);
+  assert.equal(maxActive, 4);
+  assert.equal(active, 0);
+  assert.equal(result.modeStatus.tram.status, 'unavailable');
+});
+
 test('decodes GTFS-RT v2 and keeps only safe vehicle fields', async () => {
   const malicious = vehicle('entity-<script>', 144.96, -37.81, {
     trip: { tripId: 'trip\u0000unsafe', routeId: 'route<script>' },

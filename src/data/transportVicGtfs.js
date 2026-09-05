@@ -197,6 +197,7 @@ function inBounds(vehicle, bbox) {
 /** Fetch, decode and globally cache Transport Victoria vehicle-position feeds. */
 export function createTransportVicGtfs({
   fetchImpl = fetch,
+  requestRunner = (operation) => operation(),
   now = () => Date.now(),
   cache = globalModeCache,
   inFlight = globalModeInFlight,
@@ -204,28 +205,34 @@ export function createTransportVicGtfs({
   maxFeedBytes = TRANSPORT_VIC_PROVISIONAL_MAX_FEED_BYTES,
 } = {}) {
   async function refreshMode(mode, apiKey) {
-    const controller = new AbortController();
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort(codedError('TIMEOUT', 'transport feed unavailable'));
-    }, timeoutMs);
     try {
-      const response = await fetchImpl(TRANSPORT_VIC_FEED_URLS[mode], {
-        method: 'GET',
-        headers: { KeyID: apiKey, Accept: 'application/x-protobuf' },
-        signal: controller.signal,
-        redirect: 'error',
+      return await requestRunner(async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => {
+          timedOut = true;
+          controller.abort(codedError('TIMEOUT', 'transport feed unavailable'));
+        }, timeoutMs);
+        try {
+          const response = await fetchImpl(TRANSPORT_VIC_FEED_URLS[mode], {
+            method: 'GET',
+            headers: { KeyID: apiKey, Accept: 'application/x-protobuf' },
+            signal: controller.signal,
+            redirect: 'error',
+          });
+          if (response?.status === 401 || response?.status === 403) {
+            throw codedError('CREDENTIALS_REQUIRED', 'regional source credentials required');
+          }
+          if (!response?.ok) throw codedError('UPSTREAM_FAILED', 'transport feed unavailable');
+          const bytes = await readBinaryCapped(response, maxFeedBytes);
+          const snapshot = decodeSnapshot(mode, bytes);
+          if (!snapshotState(snapshot, now())) throw codedError('STALE_FEED', 'transport feed unavailable');
+          cache.set(mode, { snapshot, cachedAt: now() });
+          return { snapshot, forceStale: false };
+        } finally {
+          clearTimeout(timer);
+        }
       });
-      if (response?.status === 401 || response?.status === 403) {
-        throw codedError('CREDENTIALS_REQUIRED', 'regional source credentials required');
-      }
-      if (!response?.ok) throw codedError('UPSTREAM_FAILED', 'transport feed unavailable');
-      const bytes = await readBinaryCapped(response, maxFeedBytes);
-      const snapshot = decodeSnapshot(mode, bytes);
-      if (!snapshotState(snapshot, now())) throw codedError('STALE_FEED', 'transport feed unavailable');
-      cache.set(mode, { snapshot, cachedAt: now() });
-      return { snapshot, forceStale: false };
     } catch (error) {
       if (error?.code === 'CREDENTIALS_REQUIRED') throw error;
       const existing = cache.get(mode);
@@ -236,8 +243,6 @@ export function createTransportVicGtfs({
         throw codedError('TIMEOUT', 'regional source timed out');
       }
       throw codedError('MODE_UNAVAILABLE', 'transport feed unavailable');
-    } finally {
-      clearTimeout(timer);
     }
   }
 

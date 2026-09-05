@@ -48,24 +48,27 @@ function bay(overrides = {}) {
 
 test('builds only fixed Opendatasoft v2.1 spatial requests for civic datasets', () => {
   const expected = new Map([
-    ['melbourne-drinking-fountains', [['drinking-fountains', 'geo_point_2d', 'assetid']]],
-    ['melbourne-barbecues', [['public-barbecues', 'geo_point_2d', 'assetid']]],
-    ['melbourne-development', [['development-activity-monitor', 'geopoint', 'development_key']]],
-    ['melbourne-culture', [['outdoor-artworks', 'geo_point_2d', 'asset_id'], ['public-memorials-and-sculptures', 'co_ordinates', 'title,description']]],
+    ['melbourne-drinking-fountains', [['drinking-fountains', 'geo_point_2d', 'assetid', 'assetid']]],
+    ['melbourne-barbecues', [['public-barbecues', 'geo_point_2d', 'assetid', 'assetid']]],
+    ['melbourne-development', [['development-activity-monitor', 'geopoint', 'development_key', 'development_key']]],
+    ['melbourne-culture', [['outdoor-artworks', 'geo_point_2d', 'asset_id', 'asset_id'], ['public-memorials-and-sculptures', 'co_ordinates', '', undefined]]],
   ]);
 
   for (const [sourceId, datasets] of expected) {
     const requests = melbourneCivicSpatialRequests(sourceId, BBOX, 500);
-    assert.deepEqual(requests.map(({ dataset, geometryField, orderBy }) => [dataset, geometryField, orderBy]), datasets);
+    assert.deepEqual(requests.map(({ dataset, geometryField, orderBy, rowKey }) => [dataset, geometryField, orderBy, rowKey]), datasets);
     for (const request of requests) {
       assert.equal(request.url.origin, 'https://data.melbourne.vic.gov.au');
-      assert.equal(request.url.pathname, `/api/explore/v2.1/catalog/datasets/${request.dataset}/records`);
-      assert.equal(request.url.searchParams.get('limit'), '100');
-      assert.equal(request.url.searchParams.get('offset'), '0');
-      assert.match(request.url.searchParams.get('where'), new RegExp(`^in_bbox\\(${request.geometryField}, -37\\.9, 144\\.9, -37\\.8, 145\\)$`));
+      const isExport = request.dataset === 'public-memorials-and-sculptures';
+      assert.equal(request.url.pathname, `/api/explore/v2.1/catalog/datasets/${request.dataset}/${isExport ? 'exports/json' : 'records'}`);
+      assert.equal(request.url.searchParams.get('limit'), isExport ? null : '100');
+      assert.equal(request.url.searchParams.get('offset'), isExport ? null : '0');
+      if (isExport) assert.equal(request.url.searchParams.get('where'), null);
+      else assert.match(request.url.searchParams.get('where'), new RegExp(`^in_bbox\\(${request.geometryField}, -37\\.9, 144\\.9, -37\\.8, 145\\)$`));
       assert.ok(request.url.searchParams.get('select'));
-      assert.ok(request.url.searchParams.get('order_by'), `${request.dataset} must have deterministic pagination`);
-      assert.doesNotMatch(request.url.searchParams.get('select'), /assetid|asset_id|company|contract|manager|property_id|development_key|street_address|planning_application|history|inscription/i);
+      if (isExport) assert.equal(request.url.searchParams.get('order_by'), null);
+      else assert.ok(request.url.searchParams.get('order_by'), `${request.dataset} must have deterministic pagination`);
+      assert.doesNotMatch(request.url.searchParams.get('select'), /company|contract|manager|property_id|street_address|planning_application|history|inscription/i);
     }
   }
   assert.throws(() => melbourneCivicSpatialRequests('melbourne-parking-live', BBOX, 500), /provider-wide/i);
@@ -180,6 +183,28 @@ test('development omits identifiers and full address and remains monthly context
   assert.equal(feature.properties.freshnessClass, 'monthly-context');
   assert.match(feature.properties.caveat, /not live works/i);
   assert.doesNotMatch(JSON.stringify(feature), /X000557|100435|100436|Anderson|TP-123/);
+  assert.match(feature.id, /^melbourne-development-[a-f0-9]{24}$/);
+});
+
+test('development deduplicates repeated opaque source rows but preserves distinct same-site records', async () => {
+  const shared = {
+    status: 'COMPLETED', clue_small_area: 'Melbourne', geopoint: { lon: 144.95, lat: -37.85 },
+  };
+  const first = { ...shared, development_key: 'X000005', year_completed: '2002', floors_above: 4, resi_dwellings: 0 };
+  const second = { ...shared, development_key: 'X0004207', year_completed: '2020', floors_above: 1, resi_dwellings: 9 };
+  const client = createMelbourneCivicClient({
+    limits: { pageRows: 2 },
+    fetchImpl: async (input) => jsonResponse(Number(new URL(input).searchParams.get('offset')) === 0
+      ? { total_count: 4, results: [first, second] }
+      : { total_count: 4, results: [first, second] }),
+  });
+
+  const result = await client.load('melbourne-development', { bbox: BBOX, maxFeatures: 10 });
+  assert.equal(result.features.length, 2);
+  assert.equal(new Set(result.features.map(({ id }) => id)).size, 2);
+  assert.deepEqual(result.features.map(({ properties }) => properties.yearCompleted), ['2002', '2020']);
+  assert.equal(result.sourceStatus.datasets[0].duplicates, 2);
+  assert.doesNotMatch(JSON.stringify(result), /X000005|X0004207|development_key/);
 });
 
 test('culture keeps minimal address-safe metadata and uses declared geometry', () => {
@@ -351,6 +376,42 @@ test('deduplicates overlapping ordered spatial pages and reports partial', async
   assert.equal(result.sourceStatus.datasets[0].duplicates, 1);
 });
 
+test('memorial export is bbox-filtered, order-independent and keeps equal-title rows at distinct coordinates', async () => {
+  const paintedPoles = [
+    { title: 'Painted Poles', description: 'Same provider description', co_ordinates: { lon: 144.951, lat: -37.851 } },
+    { title: 'Painted Poles', description: 'Same provider description', co_ordinates: { lon: 144.952, lat: -37.852 } },
+  ];
+  const run = async (rows) => {
+    const calls = [];
+    const client = createMelbourneCivicClient({
+      fetchImpl: async (input) => {
+        const url = new URL(input);
+        calls.push(url);
+        if (url.pathname.includes('public-memorials-and-sculptures')) return jsonResponse(rows);
+        return jsonResponse({ total_count: 0, results: [] });
+      },
+    });
+    const result = await client.load('melbourne-culture', { bbox: BBOX, maxFeatures: 500 });
+    const cached = await client.load('melbourne-culture', {
+      bbox: { west: 144.9515, south: -37.853, east: 144.953, north: -37.8515 }, maxFeatures: 500,
+    });
+    return { result, cached, calls };
+  };
+  const forward = await run([...paintedPoles, { title: 'Outside', co_ordinates: { lon: 150, lat: -30 } }]);
+  const reverse = await run([{ title: 'Outside', co_ordinates: { lon: 150, lat: -30 } }, ...paintedPoles].reverse());
+
+  assert.equal(forward.result.features.length, 2);
+  assert.equal(reverse.result.features.length, 2);
+  assert.deepEqual(
+    forward.result.features.map(({ id }) => id).sort(),
+    reverse.result.features.map(({ id }) => id).sort(),
+  );
+  assert.equal(new Set(forward.result.features.map(({ id }) => id)).size, 2);
+  assert.equal(forward.cached.features.filter(({ properties }) => properties.title === 'Painted Poles').length, 1);
+  assert.equal(forward.calls.filter((url) => url.pathname.endsWith('/public-memorials-and-sculptures/exports/json')).length, 1);
+  assert.doesNotMatch(JSON.stringify(forward.result), /Same provider description/);
+});
+
 test('culture retains one dataset when its sibling fails and marks the source partial', async () => {
   const client = createMelbourneCivicClient({
     now: () => NOW,
@@ -425,10 +486,15 @@ test('the page byte ceiling stops reading an oversized streaming response early'
 });
 
 test('concurrent civic datasets share one hard aggregate byte budget', async () => {
-  const payload = JSON.stringify({ total_count: 0, results: [] });
   const client = createMelbourneCivicClient({
     limits: { pageBytes: 40, totalBytes: 50 },
-    fetchImpl: async () => new Response(payload, { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    fetchImpl: async (input) => {
+      const exportRequest = new URL(input).pathname.endsWith('/exports/json');
+      const payload = exportRequest
+        ? JSON.stringify([{ title: 'xxxxxxxxxxxx' }])
+        : JSON.stringify({ total_count: 0, results: [] });
+      return new Response(payload, { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
   });
   const result = await client.load('melbourne-culture', { bbox: BBOX, maxFeatures: 500 });
   assert.equal(result.sourceStatus.status, 'partial');
