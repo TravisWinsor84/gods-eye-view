@@ -21,11 +21,12 @@ function featureCollection(features) {
   return { type: 'FeatureCollection', features };
 }
 
-function response(features, status = 200) {
+function response(features, status = 200, { headers = {}, body = null, modeStatus = undefined } = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    async json() { return featureCollection(features); },
+    headers: { get(name) { return headers[String(name).toLowerCase()] ?? null; } },
+    async json() { return body || { ...featureCollection(features), ...(modeStatus ? { modeStatus } : {}) }; },
   };
 }
 
@@ -383,6 +384,7 @@ for (const outcome of ['resolution', 'rejection']) {
       error: null,
       status: 'idle',
       sourceErrors: {},
+      sourceStatus: {},
     });
   });
 }
@@ -411,6 +413,50 @@ test('zoom culling avoids browser fetches and reports guidance instead of a feed
   assert.equal(layer.getStats().error, null);
 });
 
+test('preserves sanitized credentials-required status from a 424 response', async () => {
+  const { viewer } = viewerStub();
+  const layer = createRegionalLayer({ id: 'regional-victoria', sourceIds: ['ptv-transit'] });
+  await layer.init(viewer);
+  await layer.enable(viewer);
+
+  const updated = await withFetch(async () => response([], 424, {
+    headers: { 'x-regional-status': 'credentials-required' },
+    body: { error: 'regional source credentials required' },
+  }), () => layer.update(viewer));
+
+  assert.equal(updated, false);
+  assert.deepEqual(layer.getStats().sourceStatus, {
+    'ptv-transit': { status: 'credentials-required', modes: {} },
+  });
+  assert.equal(layer.getStats().status, 'unavailable');
+  assert.match(layer.getStats().error, /credentials required/);
+  assert.doesNotMatch(layer.getStats().error, /HTTP 424/);
+});
+
+test('surfaces per-mode stale and unavailable status as degraded while retaining available vehicles', async () => {
+  const { viewer } = viewerStub();
+  const layer = createRegionalLayer({ id: 'regional-victoria', sourceIds: ['ptv-transit'] });
+  await layer.init(viewer);
+  await layer.enable(viewer);
+  const modeStatus = {
+    metro: { status: 'current', feedTimestamp: 1_800_000_000, feedAgeSeconds: 10 },
+    tram: { status: 'stale', feedTimestamp: 1_799_999_850, feedAgeSeconds: 150 },
+    bus: { status: 'unavailable' },
+    vline: { status: 'current', feedTimestamp: 1_800_000_000, feedAgeSeconds: 10 },
+  };
+
+  assert.equal(await withFetch(async () => response(
+    [pointFeature('ptv-safe', 144.96, -37.81)],
+    200,
+    { headers: { 'x-regional-status': 'degraded' }, modeStatus },
+  ), () => layer.update(viewer)), true);
+
+  assert.equal(layer.getStats().status, 'degraded');
+  assert.deepEqual(layer.getStats().sourceStatus['ptv-transit'], { status: 'degraded', modes: modeStatus });
+  assert.match(layer.getStats().error, /tram stale/);
+  assert.match(layer.getStats().error, /bus unavailable/);
+});
+
 test('disable hides and detaches camera work while destroy removes the owned source', async () => {
   const { viewer, added, removed, moveEnd } = viewerStub();
   const layer = createRegionalLayer({
@@ -431,5 +477,5 @@ test('disable hides and detaches camera work while destroy removes the owned sou
 
   await layer.destroy(viewer);
   assert.deepEqual(removed, [{ dataSource: added[0], destroy: true }]);
-  assert.deepEqual(layer.getStats(), { count: 0, lastUpdate: null, error: null, status: 'idle', sourceErrors: {} });
+  assert.deepEqual(layer.getStats(), { count: 0, lastUpdate: null, error: null, status: 'idle', sourceErrors: {}, sourceStatus: {} });
 });

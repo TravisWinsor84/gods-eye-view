@@ -72,11 +72,19 @@ never emitted as numbers. This registration does not add a proxy, layer or UI.
 metro, tram, bus and V/Line. The server sends
 `TRANSPORT_VIC_OPEN_DATA_API_KEY` only in the upstream `KeyID` header with
 `Accept: application/x-protobuf`; browser requests remain fixed to
-`/api/regional/ptv-transit` with validated bounds. Responses retain only safe
-vehicle, trip and route identifiers plus timestamp, bearing and occupancy when
-valid. Publisher-facing labels, licence plates and other internal identifiers
-are not exposed. Each response reports per-mode current, stale or unavailable
-status and feed age; over-age positions are discarded. Trip updates,
+`/api/regional/ptv-transit` with validated bounds. Set the browser-safe boolean
+`VITE_TRANSPORT_VIC_OPEN_DATA_CONFIGURED=true` alongside the server-only key to
+add this source to the Victoria pack; it contains no credential. Responses use
+a deterministic digest identity and retain only safe trip and route identifiers
+plus timestamp, bearing and occupancy when valid. GTFS entity IDs, vehicle IDs,
+publisher-facing labels and licence plates are never exposed. Each response
+reports per-mode current, stale or unavailable status and feed age; over-age
+positions are discarded. A single 32 MiB provisional hard safety ceiling is
+enforced while streaming each feed. The authenticated 2026-09-05 snapshot was
+15,354 bytes for metro, 119,651 bytes for bus and 3,290 bytes for V/Line; tram
+returned an honest HTTP 500 provider failure, so repeated successful measurements
+across all four modes are still required before introducing source-specific
+limits. Trip updates,
 departures and static GTFS joins are not implemented. The legacy PTV v3
 credential contract is not used.
 
@@ -195,4 +203,4 @@ Douglas-Peucker simplification, 6-decimal rounding).
 
 ## In-app attribution
 
-The required Google Maps / Cesium credit renders on the on-globe credit line (`#cesium-credits`, bottom-left) and must stay visible — including in clean-view and recording modes (the whole line, logo + "Google Maps" + the "Data attribution" link, stays on screen; only the GEV panels/HUD fade). The layer-specific credits (adsb.lol, TeleGeography, OSM datacenters/dams/roads, NASA FIRMS, CelesTrak, USGS, City of Austin, GBFS, Radio Browser, OpenSky, AISStream) are registered into the expandable **"Data attribution"** popover on that credit line via `viewer.creditDisplay.addStaticCredit(new Cesium.Credit(html, /* showOnScreen */ false))` — see `src/data/dataCredits.js`. When you add a new data source, add its license and attribution to this file **and** append an entry to `DATA_CREDITS` in `src/data/dataCredits.js` so it surfaces in the app.
+The required Google Maps / Cesium credit renders on the on-globe credit line (`#cesium-credits`, bottom-left) and must stay visible — including in clean-view and recording modes (the whole line, logo + "Google Maps" + the "Data attribution" link, stays on screen; only the GEV panels/HUD fade). The layer-specific credits (adsb.lol, TeleGeography, OSM datacenters/dams/roads, NASA FIRMS, CelesTrak, USGS, City of Austin, GBFS, Radio Browser, OpenSky, AISStream, Public Transport Victoria) are registered into the expandable **"Data attribution"** popover on that credit line via `viewer.creditDisplay.addStaticCredit(new Cesium.Credit(html, /* showOnScreen */ false))` — see `src/data/dataCredits.js`. When you add a new data source, add its license and attribution to this file **and** append an entry to `DATA_CREDITS` in `src/data/dataCredits.js` so it surfaces in the app.

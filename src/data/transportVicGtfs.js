@@ -24,14 +24,11 @@ export const TRANSPORT_VIC_FEED_URLS = Object.freeze(Object.fromEntries(
   MODES.map((mode) => [mode, `${BASE_URL}/${mode}/vehicle-positions`]),
 ));
 
-// Authenticated feed sizes still need measuring. These explicit per-feed caps
-// bound memory now without assuming the existing JSON proxy's 1 MB cap fits.
-export const TRANSPORT_VIC_MAX_FEED_BYTES = Object.freeze({
-  metro: 8_000_000,
-  tram: 8_000_000,
-  bus: 8_000_000,
-  vline: 8_000_000,
-});
+// One provisional hard safety ceiling is enforced while streaming every mode.
+// The 2026-09-05 authenticated snapshot was at most 119,651 bytes among the
+// three successful feeds; tram returned HTTP 500, so source-specific limits
+// remain unjustified until successful, repeated measurements cover all modes.
+export const TRANSPORT_VIC_PROVISIONAL_MAX_FEED_BYTES = 32 * 1024 * 1024;
 
 const globalModeCache = new Map();
 const globalModeInFlight = new Map();
@@ -45,6 +42,19 @@ function codedError(code, message) {
 function safeIdentifier(value, maxLength = 160) {
   if (typeof value !== 'string') return '';
   return value.replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function stableDigest(value) {
+  const text = String(value);
+  const seeds = [0x811c9dc5, 0x9e3779b9, 0x85ebca6b];
+  return seeds.map((seed) => {
+    let hash = seed >>> 0;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, '0');
+  }).join('');
 }
 
 function safeTimestamp(value) {
@@ -78,27 +88,44 @@ async function readBinaryCapped(response, maxBytes) {
     throw codedError('RESPONSE_TOO_LARGE', 'transport feed unavailable');
   }
   const reader = response.body?.getReader?.();
-  if (!reader) {
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) throw codedError('RESPONSE_TOO_LARGE', 'transport feed unavailable');
-    return bytes;
-  }
-
   const chunks = [];
   let length = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      length += value.byteLength;
-      if (length > maxBytes) {
-        await reader.cancel();
-        throw codedError('RESPONSE_TOO_LARGE', 'transport feed unavailable');
+  if (reader) {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array)) throw codedError('INVALID_FEED', 'transport feed unavailable');
+        length += value.byteLength;
+        if (length > maxBytes) {
+          try { await reader.cancel(); } catch { /* preserve the size failure */ }
+          throw codedError('RESPONSE_TOO_LARGE', 'transport feed unavailable');
+        }
+        chunks.push(value);
       }
-      chunks.push(value);
+    } finally {
+      reader.releaseLock();
     }
-  } finally {
-    reader.releaseLock();
+  } else if (typeof response.body?.[Symbol.asyncIterator] === 'function') {
+    const iterator = response.body[Symbol.asyncIterator]();
+    let completed = false;
+    try {
+      for (;;) {
+        const { done, value } = await iterator.next();
+        if (done) { completed = true; break; }
+        const chunk = value instanceof Uint8Array ? value : null;
+        if (!chunk) throw codedError('INVALID_FEED', 'transport feed unavailable');
+        length += chunk.byteLength;
+        if (length > maxBytes) throw codedError('RESPONSE_TOO_LARGE', 'transport feed unavailable');
+        chunks.push(chunk);
+      }
+    } finally {
+      if (!completed && typeof iterator.return === 'function') {
+        try { await iterator.return(); } catch { /* preserve the read failure */ }
+      }
+    }
+  } else {
+    throw codedError('UNSUPPORTED_BODY', 'transport feed unavailable');
   }
   const bytes = new Uint8Array(length);
   let offset = 0;
@@ -123,30 +150,39 @@ function decodeSnapshot(mode, bytes) {
   if (feedTimestamp === null) throw codedError('INVALID_FEED', 'transport feed unavailable');
 
   const vehicles = [];
+  const featureIdCounts = new Map();
   for (const entity of message.entity || []) {
     const vehicle = entity?.vehicle;
     const longitude = vehicle?.position?.longitude;
     const latitude = vehicle?.position?.latitude;
     if (!finiteInRange(longitude, -180, 180) || !finiteInRange(latitude, -90, 90)) continue;
 
+    const tripId = safeIdentifier(vehicle?.trip?.tripId);
+    const routeId = safeIdentifier(vehicle?.trip?.routeId);
+    const timestamp = safeTimestamp(vehicle?.timestamp);
+    const bearing = finiteInRange(vehicle?.position?.bearing, 0, 359.999999)
+      ? vehicle.position.bearing
+      : null;
+    const occupancyStatus = Number.isInteger(vehicle?.occupancyStatus)
+      ? OCCUPANCY_STATUS[vehicle.occupancyStatus]
+      : null;
+    const digest = stableDigest(JSON.stringify([
+      mode, tripId, routeId, timestamp, feedTimestamp, longitude, latitude, bearing, occupancyStatus || '',
+    ]));
+    const featureIdBase = `ptv-${mode}-${digest}`;
+    const duplicate = (featureIdCounts.get(featureIdBase) || 0) + 1;
+    featureIdCounts.set(featureIdBase, duplicate);
     const record = {
-      entityId: safeIdentifier(entity?.id),
+      featureId: duplicate === 1 ? featureIdBase : `${featureIdBase}-${duplicate}`,
       mode,
       position: { longitude, latitude },
       feedTimestamp,
     };
-    const vehicleId = safeIdentifier(vehicle?.vehicle?.id);
-    const tripId = safeIdentifier(vehicle?.trip?.tripId);
-    const routeId = safeIdentifier(vehicle?.trip?.routeId);
-    const timestamp = safeTimestamp(vehicle?.timestamp);
-    if (vehicleId) record.vehicleId = vehicleId;
     if (tripId) record.tripId = tripId;
     if (routeId) record.routeId = routeId;
     if (timestamp !== null) record.timestamp = timestamp;
-    if (finiteInRange(vehicle?.position?.bearing, 0, 359.999999)) record.bearing = vehicle.position.bearing;
-    if (Number.isInteger(vehicle?.occupancyStatus) && OCCUPANCY_STATUS[vehicle.occupancyStatus]) {
-      record.occupancyStatus = OCCUPANCY_STATUS[vehicle.occupancyStatus];
-    }
+    if (bearing !== null) record.bearing = bearing;
+    if (occupancyStatus) record.occupancyStatus = occupancyStatus;
     vehicles.push(record);
   }
   return { feedTimestamp, vehicles };
@@ -165,11 +201,15 @@ export function createTransportVicGtfs({
   cache = globalModeCache,
   inFlight = globalModeInFlight,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  maxFeedBytes = TRANSPORT_VIC_MAX_FEED_BYTES,
+  maxFeedBytes = TRANSPORT_VIC_PROVISIONAL_MAX_FEED_BYTES,
 } = {}) {
   async function refreshMode(mode, apiKey) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(codedError('TIMEOUT', 'transport feed unavailable')), timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(codedError('TIMEOUT', 'transport feed unavailable'));
+    }, timeoutMs);
     try {
       const response = await fetchImpl(TRANSPORT_VIC_FEED_URLS[mode], {
         method: 'GET',
@@ -181,7 +221,7 @@ export function createTransportVicGtfs({
         throw codedError('CREDENTIALS_REQUIRED', 'regional source credentials required');
       }
       if (!response?.ok) throw codedError('UPSTREAM_FAILED', 'transport feed unavailable');
-      const bytes = await readBinaryCapped(response, maxFeedBytes[mode]);
+      const bytes = await readBinaryCapped(response, maxFeedBytes);
       const snapshot = decodeSnapshot(mode, bytes);
       if (!snapshotState(snapshot, now())) throw codedError('STALE_FEED', 'transport feed unavailable');
       cache.set(mode, { snapshot, cachedAt: now() });
@@ -191,6 +231,9 @@ export function createTransportVicGtfs({
       const existing = cache.get(mode);
       if (existing && snapshotState(existing.snapshot, now(), true)) {
         return { snapshot: existing.snapshot, forceStale: true };
+      }
+      if (timedOut || error?.code === 'TIMEOUT') {
+        throw codedError('TIMEOUT', 'regional source timed out');
       }
       throw codedError('MODE_UNAVAILABLE', 'transport feed unavailable');
     } finally {
@@ -217,6 +260,9 @@ export function createTransportVicGtfs({
       const settled = await Promise.allSettled(MODES.map((mode) => loadMode(mode, apiKey)));
       if (settled.some((result) => result.status === 'rejected' && result.reason?.code === 'CREDENTIALS_REQUIRED')) {
         throw codedError('CREDENTIALS_REQUIRED', 'regional source credentials required');
+      }
+      if (settled.every((result) => result.status === 'rejected' && result.reason?.code === 'TIMEOUT')) {
+        throw codedError('TIMEOUT', 'regional source timed out');
       }
 
       const modeStatus = {};

@@ -9,6 +9,7 @@ import {
 import { REGIONAL_SOURCES } from './regionalSources.js';
 import {
   REGIONAL_PACKS,
+  createRegionalPackDefinitions,
   regionalDataLayers,
   regionalPackIds,
 } from './regionalPacks.js';
@@ -33,7 +34,7 @@ test('Melbourne pack contains exactly the four approved no-account sources', () 
   ]);
 });
 
-test('regional packs contain runtime sources and the Victoria deployment includes Transport Victoria', () => {
+test('regional packs contain runtime sources and omit Transport Victoria until configured', () => {
   for (const packId of EXPECTED_PACK_IDS) {
     const sourceIds = regionalPackIds(packId);
     assert.ok(sourceIds.length > 0, `${packId} must not be empty`);
@@ -42,6 +43,11 @@ test('regional packs contain runtime sources and the Victoria deployment include
     }
   }
   assert.deepEqual(regionalPackIds('regional-victoria'), [
+    'vic-epa-air',
+    'vic-fire-context',
+    'vic-freight-network',
+  ]);
+  assert.deepEqual(createRegionalPackDefinitions({ transportVicConfigured: true })['regional-victoria'].sourceIds, [
     'vic-epa-air',
     'vic-fire-context',
     'vic-freight-network',

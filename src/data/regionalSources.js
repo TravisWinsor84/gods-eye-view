@@ -281,7 +281,7 @@ function ptvFeatures(payload, maxFeatures) {
       mode,
       stale: vehicle?.stale === true,
     };
-    for (const key of ['vehicleId', 'tripId', 'routeId']) {
+    for (const key of ['tripId', 'routeId']) {
       const value = cleanText(vehicle?.[key], 160).replace(/[<>\u0000-\u001f\u007f]/g, '');
       if (value) properties[key] = value;
     }
@@ -292,7 +292,9 @@ function ptvFeatures(payload, maxFeatures) {
       properties.bearing = vehicle.bearing;
     }
     if (validOccupancy.has(vehicle?.occupancyStatus)) properties.occupancyStatus = vehicle.occupancyStatus;
-    return feature(vehicle?.entityId || vehicle?.vehicleId, { type: 'Point', coordinates: [longitude, latitude] }, properties);
+    const featureId = cleanText(vehicle?.featureId, 200).replace(/[^a-zA-Z0-9-]/g, '');
+    if (!featureId) return null;
+    return feature(featureId, { type: 'Point', coordinates: [longitude, latitude] }, properties);
   });
 }
 

@@ -236,6 +236,29 @@ test('regional proxy maps Transport Victoria 401/403 and all-mode failure to san
   }
 });
 
+test('regional proxy preserves an all-mode Transport Victoria timeout as sanitized 504', async () => {
+  const apiKey = process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+  process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = 'secret-value';
+  try {
+    const response = await invokeRegional(createRegionalProxy({
+      transportVicGtfs: {
+        async load() {
+          const error = new Error('provider timeout with secret-value');
+          error.code = 'TIMEOUT';
+          throw error;
+        },
+      },
+    }), `/api/regional/ptv-transit${MELBOURNE_BOUNDS}`);
+    assert.equal(response.status, 504);
+    assert.deepEqual(JSON.parse(response.body), { error: 'regional source timed out' });
+    assert.equal(response.headers['x-regional-status'], 'unavailable');
+    assert.doesNotMatch(response.body, /provider|secret-value|KeyID/);
+  } finally {
+    if (apiKey === undefined) delete process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+    else process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = apiKey;
+  }
+});
+
 test('missing Google place context is a quiet keyless capability, not a 503', () => {
   assert.deepEqual(keylessGooglePlacesResponse(undefined), {
     statusCode: 200,

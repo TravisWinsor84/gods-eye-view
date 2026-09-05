@@ -254,7 +254,7 @@ test('normalizes fire context, freight, hydrology, and Transport Victoria vehicl
   });
   const transit = normalizeRegionalFeatureCollection('ptv-transit', {
     vehicles: [
-      { entityId: 'entity-1', mode: 'metro', vehicleId: 'vehicle-1', tripId: 'trip-1', routeId: 'route-1', position: { latitude: -37.8183, longitude: 144.9671 }, timestamp: 1_800_000_000, feedTimestamp: 1_799_999_990, feedAgeSeconds: 10, stale: false, bearing: 90, occupancyStatus: 'MANY_SEATS_AVAILABLE' },
+      { featureId: 'ptv-metro-acde1234', entityId: 'provider-entity-secret', mode: 'metro', vehicleId: 'provider-vehicle-secret', tripId: 'trip-1', routeId: 'route-1', position: { latitude: -37.8183, longitude: 144.9671 }, timestamp: 1_800_000_000, feedTimestamp: 1_799_999_990, feedAgeSeconds: 10, stale: false, bearing: 90, occupancyStatus: 'MANY_SEATS_AVAILABLE' },
       { entityId: 'bad-range', mode: 'tram', position: { latitude: -91, longitude: 144.9 } },
       { entityId: 'bad-nan', mode: 'bus', position: { latitude: -37.8, longitude: Number.NaN } },
     ],
@@ -265,11 +265,14 @@ test('normalizes fire context, freight, hydrology, and Transport Victoria vehicl
   assert.equal(hydrology.features[0].properties.title, 'Merri Creek');
   assert.deepEqual(transit.features[0].geometry.coordinates, [144.9671, -37.8183]);
   assert.equal(transit.features[0].properties.title, 'Metro vehicle');
-  assert.equal(transit.features[0].properties.vehicleId, 'vehicle-1');
+  assert.equal(transit.features[0].id, 'ptv-metro-acde1234');
+  assert.equal('vehicleId' in transit.features[0].properties, false);
+  assert.equal('entityId' in transit.features[0].properties, false);
   assert.equal(transit.features[0].properties.tripId, 'trip-1');
   assert.equal(transit.features[0].properties.routeId, 'route-1');
   assert.equal(transit.features[0].properties.stale, false);
   assert.deepEqual(transit.modeStatus, { metro: { status: 'current', feedTimestamp: 1_799_999_990, feedAgeSeconds: 10 } });
+  assert.doesNotMatch(JSON.stringify(transit), /provider-entity-secret|provider-vehicle-secret/);
 });
 
 test('unknown and inherited source IDs fail closed everywhere', () => {

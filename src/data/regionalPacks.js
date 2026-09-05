@@ -1,6 +1,7 @@
 import { createRegionalLayer } from './regionalLayer.js';
 
-export const REGIONAL_PACKS = Object.freeze({
+export function createRegionalPackDefinitions({ transportVicConfigured = false } = {}) {
+  return Object.freeze({
   'regional-melbourne': Object.freeze({
     name: 'Melbourne Data',
     icon: 'M',
@@ -20,7 +21,7 @@ export const REGIONAL_PACKS = Object.freeze({
       'vic-epa-air',
       'vic-fire-context',
       'vic-freight-network',
-      'ptv-transit',
+      ...(transportVicConfigured ? ['ptv-transit'] : []),
     ]),
   }),
   'regional-australia': Object.freeze({
@@ -29,7 +30,11 @@ export const REGIONAL_PACKS = Object.freeze({
     color: '#5f8dff',
     sourceIds: Object.freeze(['au-hydrology']),
   }),
-});
+  });
+}
+
+const transportVicConfigured = import.meta.env?.VITE_TRANSPORT_VIC_OPEN_DATA_CONFIGURED === 'true';
+export const REGIONAL_PACKS = createRegionalPackDefinitions({ transportVicConfigured });
 
 const EMPTY_PACK = Object.freeze([]);
 

@@ -190,6 +190,41 @@ function sourceError(sourceId, error) {
   return `${sourceName} (${sourceId}${publisher}): ${detail}`;
 }
 
+const SANITIZED_REGIONAL_ERRORS = new Set([
+  'regional source credentials required',
+  'regional source timed out',
+  'regional source is temporarily unavailable',
+  'regional source response was too large',
+  'regional source returned invalid data',
+  'regional source is unavailable',
+]);
+
+async function regionalResponseError(response) {
+  const regionalStatus = String(response?.headers?.get?.('x-regional-status') || '').trim().toLowerCase()
+    || 'unavailable';
+  let providerMessage = '';
+  try {
+    const body = await response?.json?.();
+    if (SANITIZED_REGIONAL_ERRORS.has(body?.error)) providerMessage = body.error;
+  } catch {
+    // The server contract is JSON, but client-facing errors remain sanitized
+    // when an intermediary returns an empty or non-JSON response.
+  }
+  const message = response?.status === 424 || regionalStatus === 'credentials-required'
+    ? 'regional source credentials required'
+    : providerMessage || 'regional source is temporarily unavailable';
+  const error = new Error(message);
+  error.regionalStatus = regionalStatus;
+  return error;
+}
+
+function regionalModeIssue(modeStatus) {
+  return Object.entries(modeStatus || {})
+    .filter(([, detail]) => detail?.status === 'stale' || detail?.status === 'unavailable')
+    .map(([mode, detail]) => `${mode} ${detail.status}`)
+    .join(', ');
+}
+
 /** Create one independently managed Cesium layer for a regional source pack. */
 export function createRegionalLayer({
   id,
@@ -224,6 +259,7 @@ export function createRegionalLayer({
   let status = 'idle';
   const lastGoodBySource = new Map();
   const errorsBySource = new Map();
+  const statusBySource = new Map();
 
   const render = (viewer) => {
     if (!dataSource) return;
@@ -255,7 +291,7 @@ export function createRegionalLayer({
         if (added && wantsLabel) labels += 1;
       }
     }
-    status = errorsBySource.size ? 'degraded' : (count ? 'active' : 'empty');
+    status = errorsBySource.size ? (count ? 'degraded' : 'unavailable') : (count ? 'active' : 'empty');
     viewer?.scene?.requestRender?.();
   };
 
@@ -289,6 +325,7 @@ export function createRegionalLayer({
       if (!bounds) {
         if (updateGeneration !== generation || destroyed || !enabled || !dataSource) return false;
         errorsBySource.clear();
+        statusBySource.clear();
         render(viewer);
         return true;
       }
@@ -302,12 +339,14 @@ export function createRegionalLayer({
               headers: { Accept: 'application/json' },
               signal: controller.signal,
             });
-            if (!response?.ok) throw new Error(`HTTP ${response?.status ?? '?'}`);
+            if (!response?.ok) throw await regionalResponseError(response);
             const body = await response.json();
             if (body?.type !== 'FeatureCollection' || !Array.isArray(body.features)) {
               throw new Error('invalid regional response');
             }
-            return { sourceId, body };
+            const regionalStatus = String(response?.headers?.get?.('x-regional-status') || '').trim().toLowerCase()
+              || 'fresh';
+            return { sourceId, body, regionalStatus };
           } catch (error) {
             if (controller.signal.aborted) throw error;
             return { sourceId, error };
@@ -323,11 +362,25 @@ export function createRegionalLayer({
       for (const result of results) {
         if (result.error) {
           errorsBySource.set(result.sourceId, sourceError(result.sourceId, result.error));
+          statusBySource.set(result.sourceId, {
+            status: result.error.regionalStatus || 'unavailable',
+            modes: {},
+          });
           continue;
         }
         successful += 1;
         lastGoodBySource.set(result.sourceId, result.body);
-        errorsBySource.delete(result.sourceId);
+        const modes = result.body.modeStatus || {};
+        statusBySource.set(result.sourceId, { status: result.regionalStatus, modes });
+        const modeIssue = regionalModeIssue(modes);
+        if (result.regionalStatus === 'degraded' || modeIssue) {
+          errorsBySource.set(result.sourceId, sourceError(
+            result.sourceId,
+            new Error(modeIssue || 'regional source is degraded'),
+          ));
+        } else {
+          errorsBySource.delete(result.sourceId);
+        }
       }
       if (successful > 0) lastUpdate = Date.now();
       render(viewer);
@@ -431,6 +484,7 @@ export function createRegionalLayer({
       dataSource = null;
       lastGoodBySource.clear();
       errorsBySource.clear();
+      statusBySource.clear();
       count = 0;
       lastUpdate = null;
       status = 'idle';
@@ -445,6 +499,7 @@ export function createRegionalLayer({
         error: Object.values(sourceErrors).join('; ') || null,
         status,
         sourceErrors,
+        sourceStatus: Object.fromEntries(statusBySource),
       };
     },
   };

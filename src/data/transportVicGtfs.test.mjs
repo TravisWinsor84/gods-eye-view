@@ -4,7 +4,7 @@ import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
 
 import {
   TRANSPORT_VIC_FEED_URLS,
-  TRANSPORT_VIC_MAX_FEED_BYTES,
+  TRANSPORT_VIC_PROVISIONAL_MAX_FEED_BYTES,
   createTransportVicGtfs,
 } from './transportVicGtfs.js';
 
@@ -86,7 +86,7 @@ test('decodes GTFS-RT v2 and keeps only safe vehicle fields', async () => {
   assert.ok(Math.abs(record.position.longitude - 144.96) < 0.000_01);
   assert.ok(Math.abs(record.position.latitude - -37.81) < 0.000_01);
   assert.equal(record.mode, 'metro');
-  assert.equal(record.vehicleId, 'vehicle-entity-script');
+  assert.match(record.featureId, /^ptv-metro-[a-f0-9]{24}$/);
   assert.equal(record.tripId, 'tripunsafe');
   assert.equal(record.routeId, 'routescript');
   assert.equal(record.bearing, 123.5);
@@ -97,7 +97,27 @@ test('decodes GTFS-RT v2 and keeps only safe vehicle fields', async () => {
   assert.equal(record.stale, false);
   assert.equal('label' in record, false);
   assert.equal('licensePlate' in record, false);
-  assert.doesNotMatch(JSON.stringify(result), /private label|plate-|<script>|\u0000/);
+  assert.equal('vehicleId' in record, false);
+  assert.equal('entityId' in record, false);
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /vehicle-entity-|private label|plate-|entity-<script>|<script>|\u0000/,
+  );
+});
+
+test('generates deterministic collision-safe feature identities without provider vehicle identifiers', async () => {
+  const duplicate = vehicle('provider-entity-secret', 144.96, -37.81, {
+    trip: { tripId: 'public-trip', routeId: 'public-route' },
+  });
+  const transport = client(async () => protobufResponse(feed({ entities: [duplicate, duplicate] })));
+
+  const result = await transport.load({ bbox: BBOX_WEST, apiKey: 'key', maxFeatures: 100 });
+  const metroIds = result.vehicles.filter(({ mode }) => mode === 'metro').map(({ featureId }) => featureId);
+
+  assert.equal(new Set(metroIds).size, 2);
+  assert.match(metroIds[0], /^ptv-metro-[a-f0-9]{24}$/);
+  assert.equal(metroIds[1], `${metroIds[0]}-2`);
+  assert.doesNotMatch(JSON.stringify(result), /provider-entity-secret|vehicle-provider-entity-secret|private label|plate-/);
 });
 
 test('rejects oversized binary bodies and malformed protobuf per mode', async () => {
@@ -107,7 +127,7 @@ test('rejects oversized binary bodies and malformed protobuf per mode', async ()
     calls.set(mode, (calls.get(mode) || 0) + 1);
     if (mode === 'metro') {
       return protobufResponse(new Uint8Array(), 200, {
-        'Content-Length': String(TRANSPORT_VIC_MAX_FEED_BYTES.metro + 1),
+        'Content-Length': String(TRANSPORT_VIC_PROVISIONAL_MAX_FEED_BYTES + 1),
       });
     }
     if (mode === 'tram') return protobufResponse(Uint8Array.of(0xff, 0xff, 0xff));
@@ -124,7 +144,7 @@ test('rejects oversized binary bodies and malformed protobuf per mode', async ()
   assert.doesNotMatch(JSON.stringify(result), /protobuf|byte|decoder|ff/);
 });
 
-test('times out every hanging mode with a sanitized all-mode failure', async () => {
+test('preserves a sanitized timeout when every mode times out', async () => {
   let aborted = 0;
   const transport = client((_url, { signal }) => new Promise((_resolve, reject) => {
     signal.addEventListener('abort', () => {
@@ -135,9 +155,75 @@ test('times out every hanging mode with a sanitized all-mode failure', async () 
 
   await assert.rejects(
     transport.load({ bbox: BBOX_WEST, apiKey: 'secret-value', maxFeatures: 100 }),
-    (error) => error?.code === 'ALL_MODES_FAILED' && !/secret-value|timeout|KeyID/.test(error.message),
+    (error) => error?.code === 'TIMEOUT' && !/secret-value|KeyID/.test(error.message),
   );
   assert.equal(aborted, 4);
+});
+
+test('enforces the provisional cap on an undeclared WHATWG stream and cancels the overrun', async () => {
+  let cancellations = 0;
+  const transport = client(async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(Uint8Array.of(1, 2, 3));
+        controller.enqueue(Uint8Array.of(4, 5, 6));
+      },
+      cancel() { cancellations += 1; },
+    });
+    return new Response(body, { status: 200, headers: { 'Content-Type': 'application/x-protobuf' } });
+  }, { maxFeedBytes: 4 });
+
+  await assert.rejects(
+    transport.load({ bbox: BBOX_WEST, apiKey: 'key', maxFeatures: 100 }),
+    (error) => error?.code === 'ALL_MODES_FAILED',
+  );
+  assert.equal(cancellations, 4);
+});
+
+test('bounds Node async-iterable bodies and closes each iterator on overrun', async () => {
+  let returns = 0;
+  const transport = client(async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    body: {
+      [Symbol.asyncIterator]() {
+        let index = 0;
+        return {
+          async next() {
+            index += 1;
+            return index <= 2 ? { done: false, value: Buffer.from([index, index]) } : { done: true };
+          },
+          async return() { returns += 1; return { done: true }; },
+        };
+      },
+    },
+  }), { maxFeedBytes: 3 });
+
+  await assert.rejects(
+    transport.load({ bbox: BBOX_WEST, apiKey: 'key', maxFeatures: 100 }),
+    (error) => error?.code === 'ALL_MODES_FAILED',
+  );
+  assert.equal(returns, 4);
+});
+
+test('rejects an arrayBuffer-only fallback before allocating its body', async () => {
+  let arrayBufferCalls = 0;
+  const transport = client(async (url) => {
+    const mode = new URL(url).pathname.split('/').at(-2);
+    if (mode !== 'metro') return protobufResponse(feed({ entities: [vehicle(mode, 144.9, -37.8)] }));
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      async arrayBuffer() { arrayBufferCalls += 1; return new ArrayBuffer(128); },
+    };
+  });
+
+  const result = await transport.load({ bbox: BBOX_WEST, apiKey: 'key', maxFeatures: 100 });
+  assert.equal(result.modeStatus.metro.status, 'unavailable');
+  assert.equal(result.vehicles.length, 3);
+  assert.equal(arrayBufferCalls, 0);
 });
 
 test('drops non-finite and out-of-range positions, unsafe bearings and occupancy values', async () => {
@@ -153,7 +239,7 @@ test('drops non-finite and out-of-range positions, unsafe bearings and occupancy
 
   assert.equal(result.vehicles.length, 8, 'two valid vehicles from each of four modes');
   for (const mode of ['metro', 'tram', 'bus', 'vline']) {
-    const optional = result.vehicles.find((entry) => entry.mode === mode && entry.vehicleId === 'vehicle-optional');
+    const optional = result.vehicles.find((entry) => entry.mode === mode && entry.routeId === 'route-optional');
     assert.equal('bearing' in optional, false);
     assert.equal('occupancyStatus' in optional, false);
   }
@@ -174,9 +260,9 @@ test('reuses all four globally cached mode snapshots across browser bboxes and f
 
   assert.equal(calls, 4);
   assert.equal(west.vehicles.length, 4);
-  assert.ok(west.vehicles.every(({ vehicleId }) => vehicleId === 'vehicle-west'));
+  assert.ok(west.vehicles.every(({ routeId }) => routeId === 'route-west'));
   assert.equal(east.vehicles.length, 4);
-  assert.ok(east.vehicles.every(({ vehicleId }) => vehicleId === 'vehicle-east'));
+  assert.ok(east.vehicles.every(({ routeId }) => routeId === 'route-east'));
 });
 
 test('retains successful modes with explicit sanitized partial-failure status', async () => {
