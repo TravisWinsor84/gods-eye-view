@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import * as Cesium from 'cesium';
 import {
   CANCELLED_SEARCH,
+  CITY_POIS,
   placeFramingViewport,
   PLACE_VIEWPORT_MAX_SPAN_KM,
   PLACE_ANCHOR_OFFSET_RATIO,
@@ -20,6 +21,19 @@ import {
   GLOBE_VIEW,
   searchAndFlyTo,
 } from './locations.js';
+
+test('Melbourne preset has five POIs inside valid city bounds', () => {
+  const melbourne = CITY_POIS.melbourne;
+  assert.equal(melbourne.name, 'Melbourne');
+  assert.equal(melbourne.pois.length, 5);
+  const { southwest, northeast } = melbourne.viewBounds;
+  assert.ok(southwest.lat < northeast.lat);
+  assert.ok(southwest.lng < northeast.lng);
+  for (const poi of melbourne.pois) {
+    assert.ok(poi.lat >= southwest.lat && poi.lat <= northeast.lat, `${poi.name} latitude`);
+    assert.ok(poi.lon >= southwest.lng && poi.lon <= northeast.lng, `${poi.name} longitude`);
+  }
+});
 
 function stubViewer() {
   const flights = [];
