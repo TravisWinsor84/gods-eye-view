@@ -160,6 +160,7 @@ export function createDataVicWasteFacilities({
   withRequestSlot = (operation) => operation(),
 } = {}) {
   let cached = null;
+  let refreshInFlight = null;
 
   async function requestJson(url) {
     return withRequestSlot(async () => {
@@ -228,7 +229,10 @@ export function createDataVicWasteFacilities({
       const cache = cached && now() >= cached.cachedAt && now() - cached.cachedAt < CACHE_MAX_AGE_MS
         ? 'hit'
         : 'miss';
-      const dataset = cache === 'hit' ? cached : await refresh();
+      if (cache === 'miss' && !refreshInFlight) {
+        refreshInFlight = refresh().finally(() => { refreshInFlight = null; });
+      }
+      const dataset = cache === 'hit' ? cached : await refreshInFlight;
       const result = queryDataset(dataset, bbox, maxFeatures);
       return {
         type: 'FeatureCollection',

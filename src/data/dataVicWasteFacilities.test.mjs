@@ -132,3 +132,56 @@ test('resolves official metadata, pages the fixed resource, and reuses one bound
   assert.equal(new Set(first.features.map((feature) => feature.id)).size, first.features.length);
   assert.doesNotMatch(JSON.stringify(first), /Facility Owner|Address|private/i);
 });
+
+test('coalesces concurrent cold loads into one metadata and page refresh', async () => {
+  let releaseMetadata;
+  const metadataGate = new Promise((resolve) => { releaseMetadata = resolve; });
+  const requests = [];
+  const response = (value) => new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+  const metadata = {
+    success: true,
+    result: {
+      id: '729d86ce-aae3-4f67-992c-3a7f8fa3823a',
+      name: 'victoria-s-waste-and-resource-recovery-infrastructure-map-data',
+      license_title: 'Creative Commons Attribution 4.0 International',
+      metadata_modified: '2026-02-06T21:59:51.870692',
+      resources: [{
+        id: 'e44f5d96-51e8-48ec-b674-299d100a0231',
+        name: 'October 2025', format: 'CSV', datastore_active: true,
+      }],
+    },
+  };
+  const client = wasteModule.createDataVicWasteFacilities({
+    fetchImpl: async (url) => {
+      requests.push(String(url));
+      if (String(url).includes('/package_show')) {
+        await metadataGate;
+        return response(metadata);
+      }
+      return response({
+        success: true,
+        result: {
+          total: 1,
+          records: [{
+            'Facility Name': 'Shared facility', 'Facility Type': 'Reprocessor',
+            'Infrastructure Type': 'Organics recycling', Suburb: 'Melbourne', LGA: 'Melbourne',
+            Latitude: '-37.81', Longitude: '144.96',
+          }],
+        },
+      });
+    },
+  });
+  const query = { bbox: { west: 144, south: -38, east: 146, north: -37 }, maxFeatures: 10 };
+  const first = client.load(query);
+  const second = client.load(query);
+  await Promise.resolve();
+  const metadataRequests = requests.filter((url) => url.includes('/package_show')).length;
+  releaseMetadata();
+  const [left, right] = await Promise.all([first, second]);
+  assert.equal(metadataRequests, 1);
+  assert.deepEqual(left.features, right.features);
+  assert.equal(requests.length, 2);
+});
