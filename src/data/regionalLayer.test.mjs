@@ -3,11 +3,115 @@ import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
 import {
+  REGIONAL_REQUEST_CONCURRENCY,
   REGIONAL_ENTITY_LIMIT,
   REGIONAL_LABEL_LIMIT,
   createRegionalLayer,
   estimateViewportZoom,
 } from './regionalLayer.js';
+
+test('capped results remain healthy and expose coverage, counts and source observation time', async () => {
+  const { viewer } = viewerStub();
+  const layer = createRegionalLayer({ id: 'cap-test', sourceIds: ['melbourne-trees'] });
+  await layer.init(viewer);
+  await layer.enable(viewer);
+  const feature = pointFeature('one', 144.96, -37.81);
+  feature.properties.observedAt = '2025-01-02T03:04:05Z';
+  await withFetch(async () => response([], 200, {
+    headers: { 'x-regional-status': 'partial' },
+    body: { ...featureCollection([feature]), sourceStatus: { status: 'partial', capped: true, numberMatched: 100 } },
+  }), () => layer.update(viewer));
+  const stats = layer.getStats();
+  assert.equal(stats.status, 'active');
+  assert.equal(stats.error, null);
+  assert.equal(stats.capped, true);
+  assert.match(stats.loadingLabel, /result limit.*zoom in/);
+  assert.equal(stats.sources[0].featureCount, 1);
+  assert.equal(stats.sources[0].observedAt, '2025-01-02T03:04:05.000Z');
+  assert.equal(stats.sources[0].coverage.numberMatched, 100);
+  assert.deepEqual(stats.sourceCounts, { total: 1, loaded: 1, failed: 0, stale: 0, partial: 1 });
+  await layer.destroy(viewer);
+});
+
+test('stale proxy data stays stale while successful empty coverage is not an outage', async () => {
+  const { viewer } = viewerStub();
+  const layer = createRegionalLayer({ id: 'stale-test', sourceIds: ['melbourne-trees'] });
+  await layer.init(viewer);
+  await layer.enable(viewer);
+  await withFetch(async () => response([], 200, { headers: { 'x-regional-status': 'stale' } }), () => layer.update(viewer));
+  assert.equal(layer.getStats().status, 'stale');
+  assert.equal(layer.getStats().stale, true);
+  assert.equal(layer.getStats().sources[0].observedAt, null, 'retrieval does not invent an observation time');
+  await withFetch(async () => response([], 200, {
+    headers: { 'x-regional-status': 'outside-coverage' },
+    body: { ...featureCollection([]), sourceStatus: { status: 'outside-coverage', reason: 'Viewport is outside Victoria.' } },
+  }), () => layer.update(viewer));
+  assert.equal(layer.getStats().status, 'empty');
+  assert.equal(layer.getStats().error, null);
+  assert.match(layer.getStats().loadingLabel, /outside Victoria/);
+  await layer.destroy(viewer);
+});
+
+test('camera refresh notifies fresh stats, descriptions escape markup, and destroy detaches the listener', async () => {
+  const { viewer, moveEnd, added } = viewerStub();
+  const layer = createRegionalLayer({ id: 'listener-test', sourceIds: ['melbourne-trees'] });
+  const snapshots = [];
+  layer.setStatsListener(() => snapshots.push(layer.getStats()));
+  await layer.init(viewer);
+  await layer.enable(viewer);
+  const feature = pointFeature('one', 144.96, -37.81);
+  feature.properties.description = '<img src=x onerror="alert(1)">';
+  await withFetch(async () => response([feature]), async () => {
+    moveEnd.raise();
+    await waitFor(() => snapshots.some((stats) => stats.lastUpdate && stats.count === 1));
+  });
+  const entity = added[0].entities.values[0];
+  const description = entity.description.getValue(Cesium.JulianDate.now());
+  assert.match(description, /Publisher:/);
+  assert.match(description, /&lt;img/);
+  assert.doesNotMatch(description, /<img/);
+  assert.equal(entity.properties.regionalSourceId.getValue(), 'melbourne-trees');
+  const calls = snapshots.length;
+  await layer.destroy(viewer);
+  moveEnd.raise();
+  assert.equal(snapshots.length, calls);
+});
+
+test('one shared request pool bounds packs and individual layers and drops disabled queued work', async () => {
+  const { viewer } = viewerStub();
+  const layers = [
+    createRegionalLayer({ id: 'pool-pack', sourceIds: ['melbourne-trees', 'melbourne-places', 'melbourne-cycling', 'melbourne-water-history'] }),
+    ...Array.from({ length: 3 }, (_, index) => createRegionalLayer({ id: `pool-${index}`, sourceIds: ['melbourne-trees'] })),
+  ];
+  for (const layer of layers) { await layer.init(viewer); await layer.enable(viewer); }
+  const gates = [];
+  let active = 0;
+  let peak = 0;
+  let calls = 0;
+  await withFetch(async () => {
+    calls += 1;
+    active += 1;
+    peak = Math.max(peak, active);
+    const gate = deferred();
+    gates.push(gate);
+    await gate.promise;
+    active -= 1;
+    return response([]);
+  }, async () => {
+    const updates = layers.map((layer) => layer.update(viewer));
+    await waitFor(() => calls === REGIONAL_REQUEST_CONCURRENCY);
+    await layers[3].disable(viewer);
+    for (let completed = 0; completed < 6; completed += 1) {
+      await waitFor(() => gates.length > 0);
+      gates.shift().resolve();
+    }
+    await Promise.all(updates);
+  });
+  assert.equal(calls, 6);
+  assert.equal(peak, REGIONAL_REQUEST_CONCURRENCY);
+  assert.equal(layers[3].getStats().lastUpdate, null);
+  for (const layer of layers) await layer.destroy(viewer);
+});
 
 function pointFeature(id, longitude, latitude, title = id) {
   return {
@@ -481,6 +585,10 @@ test('reports a known registration-gated category source without fetching it', a
     ageMs: null,
     error: 'EPA Victoria registration required',
     officialUrl: null,
+    featureCount: 0,
+    refresh: 'not fetched; provider contract unverified',
+    caveat: null,
+    coverage: null,
   }]);
 });
 

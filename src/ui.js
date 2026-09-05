@@ -15,6 +15,7 @@ import {
 import { LOCATIONS, CITY_POIS, GLOBE_VIEW, flyToGlobeView, flyToPresetLocation, flyToPOI, searchAndFlyTo } from './locations.js';
 import { locationMiniStatus } from './locationStatus.js';
 import { buildMapContextFromUiState, collectRegionalSourceEntries, renderMapContext } from './mapContextDom.js';
+import { createMapContextLocation, mapContextDestinationMatches, readMapContextCentre, readRegionalContextSelection } from './mapContextLocation.js';
 import { interruptCameraMotion } from './cameraVerbs.js';
 import {
   aircraftTrackingTarget,
@@ -9562,19 +9563,53 @@ export class StyleManager {
    * @returns {void}
    */
   _initMapContext() {
+    this._mapContextSelectionRemove?.();
+    this._mapContextSelectionRemove = this.viewer?.selectedEntityChanged?.addEventListener(() => {
+      this._updateMapContext();
+    });
     this._mapContextMoveEndRemove?.();
+    this._mapContextMoveStartRemove?.();
+    this._mapContextLocation?.dispose();
+    this._mapContextMoving = false;
+    this._mapContextLocation = createMapContextLocation({
+      onChange: (location) => {
+        this._mapContextCentreLocation = location;
+        this._updateMapContext();
+      },
+    });
+    const settle = () => {
+      this._mapContextMoving = false;
+      const centre = readMapContextCentre(this.viewer, Cesium);
+      this._mapContextCentre = centre;
+      this._mapContextLocation.settle(centre, {
+        resolve: !mapContextDestinationMatches(centre, this._mapContextDestination()),
+      });
+    };
+    this._mapContextMoveStartRemove = this.viewer?.camera?.moveStart?.addEventListener(() => {
+      this._mapContextMoving = true;
+      this._mapContextCentre = null;
+      this._mapContextLocation.moving();
+    });
     this._mapContextMoveEndRemove = null;
     if (typeof this.viewer?.camera?.moveEnd?.addEventListener === 'function') {
-      this._mapContextMoveEndRemove = this.viewer.camera.moveEnd.addEventListener(() => {
-        this._updateMapContext();
-      });
+      this._mapContextMoveEndRemove = this.viewer.camera.moveEnd.addEventListener(settle);
     }
-    this._updateMapContext();
+    settle();
+  }
+
+  _mapContextDestination() {
+    return {
+      city: this._activeLocationId ? CITY_POIS[this._activeLocationId] : null,
+      currentPoi: this._currentPoi,
+      searchedLabel: this._searchedLocationLabel,
+      searchedLatitude: this._searchedLocationCoordinates?.latitude,
+      searchedLongitude: this._searchedLocationCoordinates?.longitude,
+    };
   }
 
   /**
    * Project current local UI state through the pure map-context model.
-   * Regional provenance remains empty until a validated status source exists.
+   * Resolve locations only through the settled-camera lifecycle, never here.
    * @returns {void}
    */
   _updateMapContext() {
@@ -9584,15 +9619,18 @@ export class StyleManager {
       ? Cesium.Math.toDegrees(headingRadians)
       : null;
     const enabledLayers = this._dataManager?.getEnabledLayerIds?.() || new Set();
+    const sources = collectRegionalSourceEntries(this._regionalLayers, enabledLayers);
+    const regionalSelection = readRegionalContextSelection(this.viewer?.selectedEntity, this.viewer?.clock?.currentTime);
     const context = buildMapContextFromUiState({
-      city: this._activeLocationId ? CITY_POIS[this._activeLocationId] : null,
-      currentPoi: this._currentPoi,
-      searchedLabel: this._searchedLocationLabel,
-      searchedLatitude: this._searchedLocationCoordinates?.latitude,
-      searchedLongitude: this._searchedLocationCoordinates?.longitude,
+      ...this._mapContextDestination(),
+      centreLocation: this._mapContextCentreLocation,
+      useDestination: !this._mapContextMoving
+        && mapContextDestinationMatches(this._mapContextCentre, this._mapContextDestination()),
       cameraHeading,
       enabledLayers,
-      sources: collectRegionalSourceEntries(this._regionalLayers, enabledLayers),
+      sources,
+      regionalSelection: sources.some((source) => source.sourceId === regionalSelection?.sourceId)
+        ? regionalSelection : null,
       cctvEnabled: !!this._cctvState?.enabled && !!this._dataManager?.isEnabled?.('cctv'),
       activeCctvCamera: this._cctvState?.activeCamera || null,
     });
@@ -10183,6 +10221,11 @@ export class StyleManager {
     this._globalStatusNotice = null;
     if (this._globalLoadingStatus) this._globalLoadingStatus.hidden = true;
     this._disposed = true;
+    this._mapContextLocation?.dispose();
+    this._mapContextSelectionRemove?.();
+    this._mapContextSelectionRemove = null;
+    this._mapContextMoveStartRemove?.();
+    this._mapContextMoveStartRemove = null;
     // Revoke persistence/hash authority before teardown can emit manager changes.
     this._layerStateCoordinator?.destroy();
     this._layerStateCoordinator = null;

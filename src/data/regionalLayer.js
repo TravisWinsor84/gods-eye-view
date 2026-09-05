@@ -8,10 +8,52 @@ export const REGIONAL_MAX_VIEW_SPAN_DEG = 10;
 export const REGIONAL_MAX_CAMERA_HEIGHT_M = 2_000_000;
 const CAMERA_REFRESH_DELAY_MS = 75;
 const SOURCE_FRESHNESS_CLASSES = new Set(['live', 'recent', 'periodic', 'reference', 'historical', 'modelled']);
+export const REGIONAL_REQUEST_CONCURRENCY = 3;
+let activeRequests = 0;
+const requestQueue = [];
+
+function pooledRequest(signal, operation) {
+  return new Promise((resolve, reject) => {
+    const cancel = () => {
+      const index = requestQueue.indexOf(start);
+      if (index >= 0) requestQueue.splice(index, 1);
+      reject(signal.reason || new Error('Regional request aborted'));
+    };
+    const start = () => {
+      signal.removeEventListener('abort', cancel);
+      if (signal.aborted) { cancel(); return; }
+      activeRequests += 1;
+      Promise.resolve().then(operation).then(resolve, reject).finally(() => {
+        activeRequests -= 1;
+        while (activeRequests < REGIONAL_REQUEST_CONCURRENCY && requestQueue.length) requestQueue.shift()();
+      });
+    };
+    if (signal.aborted) { cancel(); return; }
+    signal.addEventListener('abort', cancel, { once: true });
+    if (activeRequests < REGIONAL_REQUEST_CONCURRENCY) start();
+    else requestQueue.push(start);
+  });
+}
 
 function cleanId(value, fallback) {
   const text = String(value ?? '').trim();
   return text || fallback;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]);
+}
+
+function featureDescription(sourceId, feature) {
+  const source = REGIONAL_SOURCES[sourceId];
+  const properties = feature.properties || {};
+  const details = [source.name, `Publisher: ${source.source}`, properties.description,
+    properties.category, properties.type, properties.status,
+    properties.observedAt ? `Observed: ${properties.observedAt}` : null,
+    source.refresh, source.sensitivityReview].filter((value) => typeof value === 'string' && value.trim());
+  return details.map((value) => `<p>${escapeHtml(value)}</p>`).join('');
 }
 
 function featureBounds(feature) {
@@ -114,8 +156,11 @@ function addGeometryEntity(dataSource, {
   const featureId = cleanId(feature.id ?? feature.properties?.id, `feature-${featureIndex}`);
   const entity = {
     id: `${sourceId}:${featureId}${suffix}`,
-    name: String(feature.properties?.title || feature.properties?.name || featureId),
-    properties: { ...feature.properties, regionalSourceId: sourceId },
+    name: String(feature.properties?.title || feature.properties?.name || REGIONAL_SOURCES[sourceId].name),
+    properties: { ...feature.properties, regionalSourceId: sourceId,
+      regionalSourceName: REGIONAL_SOURCES[sourceId].name,
+      regionalPublisher: REGIONAL_SOURCES[sourceId].source },
+    description: featureDescription(sourceId, feature),
   };
   const coordinates = geometry?.coordinates;
   if (geometry?.type === 'Point') {
@@ -275,6 +320,8 @@ export function createRegionalLayer({
   icon = '●',
   color = '#62d9ff',
   updateInterval = 300_000,
+  description = null,
+  group = 'regional',
 }) {
   if (!/^[a-z0-9-]+$/.test(id || '')) throw new Error('Regional layer requires a stable id');
   if (!Array.isArray(sourceIds) || sourceIds.length === 0) throw new Error(`${id} requires source IDs`);
@@ -297,6 +344,12 @@ export function createRegionalLayer({
   let count = 0;
   let lastUpdate = null;
   let status = 'idle';
+  let statsListener = null;
+  let renderCapped = false;
+  const notifyStats = () => {
+    // UI observers must not turn a successful feed refresh into a failure.
+    try { statsListener?.(); } catch { /* observer owns its errors */ }
+  };
   const lastGoodBySource = new Map();
   const errorsBySource = new Map();
   const statusBySource = new Map();
@@ -305,10 +358,12 @@ export function createRegionalLayer({
     if (!dataSource) return;
     dataSource.entities.removeAll();
     count = 0;
+    renderCapped = false;
     const bounds = activeViewport(viewer);
     if (!enabled || !bounds) {
       status = enabled ? 'zoom-in' : 'idle';
       viewer?.scene?.requestRender?.();
+      notifyStats();
       return;
     }
     const baseColor = Cesium.Color.fromCssColorString(color) || Cesium.Color.CYAN;
@@ -316,9 +371,11 @@ export function createRegionalLayer({
     outer: for (const sourceId of sources) {
       const features = lastGoodBySource.get(sourceId)?.features || [];
       for (let featureIndex = 0; featureIndex < features.length; featureIndex += 1) {
-        if (count >= REGIONAL_ENTITY_LIMIT) break outer;
         const feature = features[featureIndex];
         if (!intersectsBounds(feature, bounds)) continue;
+        if (count >= REGIONAL_ENTITY_LIMIT) { renderCapped = true; break outer; }
+        if (feature.geometry?.type.startsWith('Multi')
+          && feature.geometry.coordinates.length > REGIONAL_ENTITY_LIMIT - count) renderCapped = true;
         const wantsLabel = feature.geometry?.type.includes('Point') && labels < REGIONAL_LABEL_LIMIT;
         const added = addFeature(dataSource, {
           sourceId,
@@ -331,8 +388,11 @@ export function createRegionalLayer({
         if (added && wantsLabel) labels += 1;
       }
     }
-    status = errorsBySource.size ? (count ? 'degraded' : 'unavailable') : (count ? 'active' : 'empty');
+    const stale = [...statusBySource.values()].some((entry) => entry.status === 'stale');
+    status = errorsBySource.size ? (lastGoodBySource.size ? 'degraded' : 'unavailable')
+      : stale ? 'stale' : (count ? 'active' : 'empty');
     viewer?.scene?.requestRender?.();
+    notifyStats();
   };
 
   const detachCamera = () => {
@@ -380,19 +440,21 @@ export function createRegionalLayer({
             return { sourceId, error };
           }
           try {
-            const response = await fetch(proxyUrl(sourceId, bounds, viewer), {
-              method: 'GET',
-              headers: { Accept: 'application/json' },
-              signal: controller.signal,
+            return await pooledRequest(controller.signal, async () => {
+              const response = await fetch(proxyUrl(sourceId, bounds, viewer), {
+                method: 'GET',
+                headers: { Accept: 'application/json' },
+                signal: controller.signal,
+              });
+              if (!response?.ok) throw await regionalResponseError(response);
+              const body = await response.json();
+              if (body?.type !== 'FeatureCollection' || !Array.isArray(body.features)) {
+                throw new Error('invalid regional response');
+              }
+              const regionalStatus = String(response?.headers?.get?.('x-regional-status') || '').trim().toLowerCase()
+                || 'fresh';
+              return { sourceId, body, regionalStatus };
             });
-            if (!response?.ok) throw await regionalResponseError(response);
-            const body = await response.json();
-            if (body?.type !== 'FeatureCollection' || !Array.isArray(body.features)) {
-              throw new Error('invalid regional response');
-            }
-            const regionalStatus = String(response?.headers?.get?.('x-regional-status') || '').trim().toLowerCase()
-              || 'fresh';
-            return { sourceId, body, regionalStatus };
           } catch (error) {
             if (controller.signal.aborted) throw error;
             return { sourceId, error };
@@ -420,7 +482,10 @@ export function createRegionalLayer({
         successful += 1;
         lastGoodBySource.set(result.sourceId, result.body);
         const modes = result.body.modeStatus || {};
-        statusBySource.set(result.sourceId, { status: result.regionalStatus, modes });
+        statusBySource.set(result.sourceId, {
+          status: result.regionalStatus, modes,
+          ...(result.body.sourceStatus ? { detail: result.body.sourceStatus } : {}),
+        });
         const modeIssue = regionalModeIssue(modes);
         if (result.regionalStatus === 'degraded' || modeIssue) {
           errorsBySource.set(result.sourceId, sourceError(
@@ -475,9 +540,15 @@ export function createRegionalLayer({
     name,
     icon,
     color,
+    group,
+    description: description || sources.map((sourceId) => REGIONAL_SOURCES[sourceId].name).join(' / '),
     source: sources.map((sourceId) => REGIONAL_SOURCES[sourceId].source).join(' / '),
     sourceIds: sources,
     updateInterval,
+
+    setStatsListener(callback) {
+      statsListener = !destroyed && typeof callback === 'function' ? callback : null;
+    },
 
     async init(viewer) {
       if (destroyed || dataSource) return !destroyed;
@@ -520,6 +591,7 @@ export function createRegionalLayer({
       if (dataSource) dataSource.show = false;
       status = 'idle';
       viewer?.scene?.requestRender?.();
+      notifyStats();
       return true;
     },
 
@@ -527,6 +599,7 @@ export function createRegionalLayer({
       if (destroyed) return true;
       enabled = false;
       destroyed = true;
+      statsListener = null;
       cancelRefreshWork();
       detachCamera();
       if (dataSource) viewer?.dataSources?.remove?.(dataSource, true);
@@ -558,8 +631,25 @@ export function createRegionalLayer({
           ageMs: observedAt ? Math.max(0, now - Date.parse(observedAt)) : null,
           error,
           officialUrl: source.officialUrl || source.endpoint || null,
+          featureCount: lastGoodBySource.get(sourceId)?.features.length || 0,
+          refresh: source.refresh || null,
+          caveat: source.sensitivityReview || null,
+          coverage: sourceState?.detail || null,
         });
       });
+      const caveats = sourceEntries.flatMap((entry) => {
+        const detail = entry.coverage;
+        const notes = [];
+        if (detail?.reason) notes.push(`${entry.name}: ${detail.reason}`);
+        if (detail?.capped || detail?.truncated) notes.push(`${entry.name}: result limit reached; zoom in for more detail.`);
+        else if (detail?.status === 'partial' || entry.status === 'partial') notes.push(`${entry.name}: partial coverage; results are not a complete inventory.`);
+        if (entry.status === 'stale') notes.push(`${entry.name}: showing older data; current observations are unavailable.`);
+        if (entry.caveat) notes.push(`${entry.name}: ${entry.caveat}`);
+        return notes;
+      });
+      if (renderCapped) caveats.unshift(`Display limited to ${REGIONAL_ENTITY_LIMIT} map entities; zoom in for more detail.`);
+      const loadingLabel = status === 'zoom-in' ? 'Zoom in to load regional sources.'
+        : caveats[0] || (status === 'empty' ? 'No matching features in this view.' : null);
       return {
         count,
         lastUpdate,
@@ -568,6 +658,19 @@ export function createRegionalLayer({
         sourceErrors,
         sourceStatus: Object.fromEntries(statusBySource),
         sources: sourceEntries,
+        ...(!destroyed ? {
+          loadingLabel,
+          caveats,
+          stale: sourceEntries.some((entry) => entry.status === 'stale'),
+          capped: renderCapped || sourceEntries.some((entry) => entry.coverage?.capped || entry.coverage?.truncated),
+          sourceCounts: {
+            total: sources.length,
+            loaded: lastGoodBySource.size,
+            failed: errorsBySource.size,
+            stale: sourceEntries.filter((entry) => entry.status === 'stale').length,
+            partial: sourceEntries.filter((entry) => entry.status === 'partial').length,
+          },
+        } : {}),
       };
     },
   };

@@ -5,6 +5,7 @@ import {
   createDefaultLayerState,
   decodeLayerStateParams,
   encodeLayerStateParams,
+  REGIONAL_SOURCE_LAYER_TOKENS,
 } from './layerState.js';
 import { REGIONAL_SOURCES } from './regionalSources.js';
 import * as regionalPacksModule from './regionalPacks.js';
@@ -15,6 +16,7 @@ const {
   createRegionalPackDefinitions,
   regionalDataLayers,
   regionalPackIds,
+  REGIONAL_SOURCE_LAYERS,
 } = regionalPacksModule;
 
 const EXPECTED_PACK_IDS = [
@@ -27,9 +29,9 @@ const EXPECTED_PACK_IDS = [
   'regional-planning',
 ];
 
-test('defines the three compatibility packs followed by four category packs', () => {
+test('preserves legacy pack exports without registering overlapping runtime packs', () => {
   assert.deepEqual(Object.keys(REGIONAL_PACKS), EXPECTED_PACK_IDS);
-  assert.deepEqual(regionalDataLayers.map((layer) => layer.id), EXPECTED_PACK_IDS);
+  assert.ok(regionalDataLayers.every((layer) => !EXPECTED_PACK_IDS.includes(layer.id)));
   assert.deepEqual(CATEGORY_REGIONAL_PACK_IDS, [
     'regional-civic', 'regional-mobility', 'regional-environment', 'regional-planning',
   ]);
@@ -94,7 +96,7 @@ test('regional packs contain runtime sources and omit registered sources until c
   assert.equal(REGIONAL_SOURCES['ptv-transit'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');
 });
 
-test('all regional pack IDs survive the v2 share-state round trip and remain off by default', () => {
+test('legacy pack IDs migrate to the source union and remain off by default', () => {
   const defaults = createDefaultLayerState();
   assert.deepEqual(defaults.enabledLayerIds, []);
 
@@ -102,15 +104,50 @@ test('all regional pack IDs survive the v2 share-state round trip and remain off
   encodeLayerStateParams(params, { ...defaults, enabledLayerIds: EXPECTED_PACK_IDS });
   const restored = decodeLayerStateParams(params);
 
-  assert.deepEqual(restored.enabledLayerIds.filter((id) => id.startsWith('regional-')), [
-    'regional-australia',
-    'regional-civic',
-    'regional-environment',
-    'regional-melbourne',
-    'regional-mobility',
-    'regional-planning',
-    'regional-victoria',
-  ]);
+  assert.deepEqual(restored.enabledLayerIds, [...new Set(
+    Object.values(REGIONAL_PACKS).flatMap((pack) => pack.sourceIds)
+      .map((id) => `regional-source-${id}`),
+  )].sort());
+});
+
+test('each admitted source has exactly one stable module with individual presentation metadata', () => {
+  const admitted = [...new Set(Object.values(createRegionalPackDefinitions({
+    transportVicConfigured: true, wetlandsConfigured: true,
+  })).flatMap((pack) => pack.sourceIds))].sort();
+  assert.deepEqual(regionalDataLayers.flatMap((layer) => layer.sourceIds).sort(), admitted);
+  assert.deepEqual(Object.keys(REGIONAL_SOURCE_LAYER_TOKENS).sort(),
+    regionalDataLayers.map((layer) => layer.id).sort());
+  assert.equal(regionalPacksModule.default, regionalDataLayers);
+  const groups = new Set(['Civic services', 'Mobility', 'Environment', 'Places & planning']);
+  for (const layer of regionalDataLayers) {
+    assert.deepEqual(layer.sourceIds, [layer.id.slice('regional-source-'.length)]);
+    const source = REGIONAL_SOURCES[layer.sourceIds[0]];
+    if (layer.id === 'regional-source-vic-epa-air') {
+      assert.equal(source.runtimeEligible, false);
+      assert.match(layer.description, /Requires EPA access/);
+    } else {
+      assert.equal(source.runtimeEligible, true, layer.id);
+    }
+    assert.equal(layer.updateInterval, source.refreshMs > 0 ? source.refreshMs : 300_000);
+    assert.equal(layer.configuredEnv, source.configuredEnv);
+    const metadata = REGIONAL_SOURCE_LAYERS[layer.id];
+    for (const key of ['name', 'icon', 'color', 'group', 'description']) {
+      assert.equal(layer[key], metadata[key], `${layer.id} ${key}`);
+      assert.ok(layer[key].length > 0);
+    }
+    assert.match(layer.color, /^#[a-f0-9]{6}$/i);
+    assert.ok(groups.has(layer.group));
+    assert.ok(layer.description.length < 140);
+    assert.equal(Object.isFrozen(metadata.sourceIds), true);
+  }
+});
+
+test('every individual source round trips alone without enabling siblings', () => {
+  for (const layer of regionalDataLayers) {
+    const params = new URLSearchParams('v=2');
+    encodeLayerStateParams(params, { enabledLayerIds: [layer.id] });
+    assert.deepEqual(decodeLayerStateParams(params).enabledLayerIds, [layer.id]);
+  }
 });
 
 test('unknown pack IDs resolve to an empty immutable cohort', () => {

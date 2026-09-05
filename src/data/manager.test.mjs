@@ -50,6 +50,29 @@ test('keeps panel-hidden coordinator layers registered and addressable', () => {
   assert.equal(mgr.isEnabled('military-awareness'), false);
 });
 
+test('camera-driven source updates refresh row and notify context without waiting for polling', () => {
+  const mgr = new DataLayerManager({});
+  const layer = makeSlowLayer('regional-test');
+  let publish;
+  let refreshes = 0;
+  const changes = [];
+  layer.module.setStatsListener = (listener) => { publish = listener; };
+  mgr._refreshTogglePanel = () => { refreshes += 1; };
+  mgr.subscribe((change) => changes.push(change));
+  mgr.register(layer.module);
+  publish();
+  assert.equal(refreshes, 1);
+  assert.deepEqual(changes, [{ type: 'source-refresh', layerId: 'regional-test' }]);
+});
+
+test('disabled described layers do not advertise an old feed failure as current', () => {
+  const mgr = new DataLayerManager({});
+  assert.equal(mgr._buildMetaText({
+    enabled: false, description: 'Public transport positions', source: 'Transport Victoria',
+    stats: { error: 'tram unavailable' },
+  }), 'Transport Victoria · Enable to load this layer');
+});
+
 test('adopts direct layer params without re-entering the layer setter', () => {
   let params = { selectedFlightsTrackingId: 'flight-a' };
   let setterCalls = 0;

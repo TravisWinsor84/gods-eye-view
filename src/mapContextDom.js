@@ -152,6 +152,9 @@ export function buildMapContextFromUiState({
   searchedLabel = null,
   searchedLatitude = null,
   searchedLongitude = null,
+  centreLocation = null,
+  useDestination = true,
+  regionalSelection = null,
   cameraHeading = null,
   enabledLayers = [],
   sources = [],
@@ -167,7 +170,7 @@ export function buildMapContextFromUiState({
       pitch: Number.isFinite(cctvPitchDegrees) ? cctvPitchDegrees * Math.PI / 180 : null,
     }
     : null;
-  const location = city
+  const location = !useDestination ? (centreLocation || {}) : city
     ? {
       ...city,
       name: city.name,
@@ -179,7 +182,7 @@ export function buildMapContextFromUiState({
       latitude: searchedLatitude,
       longitude: searchedLongitude,
     };
-  const selection = currentPoi && !camera
+  const selection = regionalSelection || (useDestination && currentPoi && !camera
     ? {
       label: currentPoi.name,
       type: currentPoi.type ?? currentPoi.kind ?? 'landmark',
@@ -187,7 +190,7 @@ export function buildMapContextFromUiState({
       publisher: currentPoi.publisher,
       officialUrl: currentPoi.officialUrl,
     }
-    : null;
+    : null);
   const hasHeading = Number.isFinite(cameraHeading);
   const heading = hasHeading ? cameraHeading : null;
   const sourceList = Array.isArray(sources) ? sources : [];
@@ -201,12 +204,17 @@ export function buildMapContextFromUiState({
     : [];
   const context = buildMapContext({
     location,
-    selection,
+    selection: regionalSelection ? { ...regionalSelection, source: null } : selection,
     camera: camera ?? (hasHeading ? { headingDegrees: heading } : null),
     enabledLayers: Array.isArray(enabledLayers) ? enabledLayers : [...enabledLayers],
     sources: [...sourceList, ...cameraSource],
   });
-  return hasHeading ? { ...context, heading } : context;
+  return {
+    ...context,
+    ...(regionalSelection ? { explanation: `${context.explanation} · ${text(regionalSelection.source)}` } : {}),
+    ...(hasHeading ? { heading } : {}),
+    selectionKey: regionalSelection ? `${regionalSelection.sourceId}:${regionalSelection.label}` : null,
+  };
 }
 
 /**
@@ -285,5 +293,7 @@ export function renderMapContext(root, context = {}) {
   root.classList?.toggle('is-unavailable', /\bunavailable\b|\berror\b/i.test(sourceSummary));
 
   const state = ensureToggle(root);
+  if (context.selectionKey && context.selectionKey !== state.selectionKey) state.expanded = true;
+  state.selectionKey = context.selectionKey || null;
   syncExpanded(root, state.expanded);
 }

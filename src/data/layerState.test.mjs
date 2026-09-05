@@ -15,6 +15,8 @@ import {
   parseStoredLayerState,
   serializeStoredLayerState,
   validateLayerStateRegistry,
+  REGIONAL_PACKS,
+  REGIONAL_SOURCE_LAYER_TOKENS,
 } from './layerState.js';
 import radioLayer from './radio.js';
 import { stampInitialShareGesture } from '../navigationPolicy.js';
@@ -155,8 +157,8 @@ function encode(state) {
 
 test('production registry is exact, canonical, and rejects incomplete contracts', async () => {
   assert.equal(validateLayerStateRegistry(), true);
-  assert.equal(REGISTERED_LAYER_IDS.length, 24);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 24);
+  assert.equal(REGISTERED_LAYER_IDS.length, 17 + Object.keys(REGIONAL_SOURCE_LAYER_TOKENS).length);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, REGISTERED_LAYER_IDS.length);
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),
@@ -1544,6 +1546,61 @@ test('oversized and out-of-grammar tracking IDs are rejected, never truncated', 
       `round-trip preserved: ${good}`,
     );
   }
+});
+
+test('regional legacy tokens and stored IDs migrate once into independent selections', () => {
+  const legacy = {
+    h: 'regional-australia', l: 'regional-civic', n: 'regional-environment',
+    j: 'regional-melbourne', o: 'regional-mobility', p: 'regional-planning',
+    k: 'regional-victoria',
+  };
+  for (const [token, id] of Object.entries(legacy)) {
+    const expected = REGIONAL_PACKS[id].sourceIds.map((sourceId) => `regional-source-${sourceId}`).sort();
+    assert.deepEqual(decodeLayerStateParams(new URLSearchParams(`v=2&l=${token}`)).enabledLayerIds, expected);
+    const local = parseStoredLayerState(JSON.stringify({ v: 2, l: [id], o: {} }));
+    assert.deepEqual(local.enabledLayerIds, expected);
+    assert.deepEqual(normalizeLayerState(local), local, 'migration is idempotent');
+    const persisted = JSON.parse(serializeStoredLayerState(local));
+    assert.deepEqual(persisted.l, expected);
+    assert.ok(!persisted.l.includes(id));
+  }
+  const mixed = normalizeLayerState({ enabledLayerIds: [
+    'regional-melbourne', 'regional-environment', 'regional-source-melbourne-trees',
+  ] });
+  assert.equal(mixed.enabledLayerIds.filter((id) => id === 'regional-source-melbourne-trees').length, 1);
+  const off = { ...mixed, enabledLayerIds: mixed.enabledLayerIds.filter((id) => id !== 'regional-source-melbourne-trees') };
+  assert.deepEqual(parseStoredLayerState(serializeStoredLayerState(off)), off);
+  assert.deepEqual(decodeLayerStateParams(new URLSearchParams(encode(off))), off);
+});
+
+test('all registered layers fit the bounded share codec and new tokens fail closed when malformed', () => {
+  const state = normalizeLayerState({ enabledLayerIds: REGISTERED_LAYER_IDS });
+  const params = new URLSearchParams(encode(state));
+  assert.ok(params.get('l').length > 64, 'exercises the old field ceiling');
+  assert.deepEqual(decodeLayerStateParams(params), state);
+  for (const token of ['r00', 'r99', 'r001', 'r-1', 'R01', 'r01.unknown']) {
+    assert.equal(decodeLayerStateParams(new URLSearchParams(`v=2&l=${token}`)), null, token);
+  }
+  assert.throws(() => validateLayerStateRegistry([
+    { id: 'reused-legacy', token: 'h', disposition: 'enabled-only' },
+  ]), /Invalid layer-state token/);
+});
+
+test('restoring a legacy pack enables only individual modules which can be switched off independently', async () => {
+  const manager = productionManager();
+  const storage = memoryStorage(JSON.stringify({ v: 2, l: ['regional-melbourne'], o: {} }));
+  const coordinator = new LayerStateCoordinator(manager, shareSink(), { storage });
+  await coordinator.start();
+  const trees = 'regional-source-melbourne-trees';
+  const cycling = 'regional-source-melbourne-cycling';
+  assert.equal(manager.getLayerLifecycleState(trees).enabled, true);
+  assert.equal(manager.getLayerLifecycleState(cycling).enabled, true);
+  assert.equal(manager.layers.has('regional-melbourne'), false);
+  await manager.setEnabled(trees, false, { origin: 'user' });
+  assert.equal(manager.getLayerLifecycleState(cycling).enabled, true);
+  assert.equal(coordinator.getDurableState().enabledLayerIds.includes(trees), false);
+  assert.equal(parseStoredLayerState(storage.getItem(LAYER_STATE_STORAGE_KEY)).enabledLayerIds.includes(trees), false);
+  coordinator.destroy();
 });
 
 test('an oversized enabled-layer field fails closed instead of decoding a prefix', () => {
