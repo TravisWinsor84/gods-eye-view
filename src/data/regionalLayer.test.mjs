@@ -290,6 +290,69 @@ test('disable cancels scheduled and in-flight camera refresh work', async () => 
   assert.equal(fetches, 2);
 });
 
+test('rapid disable and re-enable isolates active updates by generation', async () => {
+  let rectangle = Cesium.Rectangle.fromDegrees(144.8, -37.9, 145.0, -37.7);
+  const fixture = viewerStub();
+  fixture.viewer.camera.computeViewRectangle = () => rectangle;
+  const layer = createRegionalLayer({
+    id: 'regional-melbourne',
+    sourceIds: ['melbourne-places'],
+  });
+  const staleResponse = deferred();
+  const currentResponse = deferred();
+  const urls = [];
+  await layer.init(fixture.viewer);
+  await layer.enable(fixture.viewer);
+
+  await withFetch(async (url) => {
+    urls.push(String(url));
+    if (urls.length === 1) return staleResponse.promise;
+    if (urls.length === 2) return response([pointFeature('fresh', 146.0, -38.5)]);
+    return currentResponse.promise;
+  }, async () => {
+    const staleUpdate = layer.update(fixture.viewer);
+    await waitFor(() => urls.length === 1, 'stale generation did not start');
+
+    await layer.disable(fixture.viewer);
+    rectangle = Cesium.Rectangle.fromDegrees(145.9, -38.6, 146.1, -38.4);
+    await layer.enable(fixture.viewer);
+    const freshUpdate = layer.update(fixture.viewer);
+    await waitFor(() => urls.length === 2, 're-enabled generation did not start a fresh request');
+    assert.equal(await freshUpdate, true);
+    assert.deepEqual(fixture.added[0].entities.values.map((entity) => entity.id), [
+      'melbourne-places:fresh',
+    ]);
+    const freshLastUpdate = layer.getStats().lastUpdate;
+
+    const currentUpdate = layer.update(fixture.viewer);
+    await waitFor(() => urls.length === 3, 'current generation follow-up did not start');
+    staleResponse.resolve(response([pointFeature('stale', 146.0, -38.5)]));
+    assert.equal(await staleUpdate, false);
+    assert.equal(layer.getStats().lastUpdate, freshLastUpdate);
+    assert.deepEqual(fixture.added[0].entities.values.map((entity) => entity.id), [
+      'melbourne-places:fresh',
+    ]);
+
+    const coalescedUpdate = layer.update(fixture.viewer);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(urls.length, 3);
+    currentResponse.resolve(response([pointFeature('current', 146.0, -38.5)]));
+    assert.equal(await currentUpdate, true);
+    assert.equal(await coalescedUpdate, true);
+    assert.deepEqual(fixture.added[0].entities.values.map((entity) => entity.id), [
+      'melbourne-places:current',
+    ]);
+  });
+
+  assert.deepEqual(
+    urls.slice(0, 2).map((url) => Object.fromEntries(new URL(url, 'http://test').searchParams)),
+    [
+      { west: '144.8', south: '-37.9', east: '145', north: '-37.7' },
+      { west: '145.9', south: '-38.6', east: '146.1', north: '-38.4' },
+    ],
+  );
+});
+
 for (const outcome of ['resolution', 'rejection']) {
   test(`destroy prevents deferred fetch ${outcome} from repopulating layer state`, async () => {
     const fixture = viewerStub();

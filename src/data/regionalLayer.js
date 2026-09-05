@@ -216,6 +216,7 @@ export function createRegionalLayer({
   let cameraRefreshTimer = null;
   let queuedCameraRefresh = null;
   let activeUpdate = null;
+  let activeUpdateGeneration = null;
   let activeUpdateController = null;
   let generation = 0;
   let count = 0;
@@ -273,10 +274,11 @@ export function createRegionalLayer({
 
   const runUpdate = (viewer, externalSignal = null) => {
     if (destroyed || !enabled || !dataSource) return Promise.resolve(false);
-    if (activeUpdate) return activeUpdate;
+    if (activeUpdate && activeUpdateGeneration === generation) return activeUpdate;
 
     const updateGeneration = generation;
     const controller = new AbortController();
+    activeUpdateGeneration = updateGeneration;
     activeUpdateController = controller;
     const abortFromExternal = () => controller.abort(externalSignal?.reason);
     if (externalSignal?.aborted) abortFromExternal();
@@ -336,6 +338,7 @@ export function createRegionalLayer({
       externalSignal?.removeEventListener?.('abort', abortFromExternal);
       if (activeUpdate !== wrappedUpdate) return;
       activeUpdate = null;
+      activeUpdateGeneration = null;
       activeUpdateController = null;
       const queued = queuedCameraRefresh;
       queuedCameraRefresh = null;
@@ -357,7 +360,7 @@ export function createRegionalLayer({
     cameraRefreshTimer = setTimeout(() => {
       cameraRefreshTimer = null;
       if (scheduledGeneration !== generation || destroyed || !enabled || !dataSource) return;
-      if (activeUpdate) {
+      if (activeUpdate && activeUpdateGeneration === scheduledGeneration) {
         queuedCameraRefresh = { viewer, generation: scheduledGeneration };
         return;
       }
