@@ -60,6 +60,8 @@ export function buildMapContextFromUiState({
   city = null,
   currentPoi = null,
   searchedLabel = null,
+  searchedLatitude = null,
+  searchedLongitude = null,
   cameraHeading = null,
   enabledLayers = [],
   sources = [],
@@ -82,7 +84,11 @@ export function buildMapContextFromUiState({
       latitude: currentPoi?.lat,
       longitude: currentPoi?.lon ?? currentPoi?.lng,
     }
-    : { name: searchedLabel };
+    : {
+      name: searchedLabel,
+      latitude: searchedLatitude,
+      longitude: searchedLongitude,
+    };
   const selection = currentPoi && !camera
     ? {
       label: currentPoi.name,

@@ -103,13 +103,15 @@ test('buildMapContextFromUiState includes the active CCTV camera only while CCTV
   assert.equal(disabled.sourceSummary, 'No active source provenance');
 });
 
-test('buildMapContextFromUiState uses free-text search labels without inventing coordinates', () => {
+test('buildMapContextFromUiState preserves resolved free-text search coordinates', () => {
   const context = buildMapContextFromUiState({
     searchedLabel: 'Melbourne VIC, Australia',
+    searchedLatitude: -37.8136,
+    searchedLongitude: 144.9631,
   });
 
   assert.equal(context.accessibleTitle, 'Melbourne VIC, Australia');
-  assert.equal(context.coordinates, null);
+  assert.equal(context.coordinates, '-37.8136, 144.9631');
   assert.equal(Object.hasOwn(context, 'heading'), false);
 });
 

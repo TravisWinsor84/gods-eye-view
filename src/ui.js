@@ -2388,6 +2388,7 @@ export class StyleManager {
     // _activeLocationId instead; a search has no preset record, so this is the
     // only thing the mini-status can report for it.
     this._searchedLocationLabel = null;
+    this._searchedLocationCoordinates = null;
     this._trafficSyncFeedbackState = createTrafficSyncFeedbackState();
     this._trafficTransitionTimer = null;
     this._lastTrafficChipUpdateAt = 0;
@@ -9332,6 +9333,10 @@ export class StyleManager {
             // Set before _setActiveLocation(null) so its own mini-status
             // refresh already sees the destination — the readout never blinks
             // through "Location: --" on the way to the searched place.
+            this._searchedLocationCoordinates = {
+              latitude: destination.latitude,
+              longitude: destination.longitude,
+            };
             this._searchedLocationLabel = destination.label || query;
             this._setActiveLocation(null);
             this._currentPoi = null;
@@ -9526,8 +9531,9 @@ export class StyleManager {
    * @returns {void}
    */
   clearSearchedLocation() {
-    if (this._searchedLocationLabel === null) return;
+    if (this._searchedLocationLabel === null && this._searchedLocationCoordinates === null) return;
     this._searchedLocationLabel = null;
+    this._searchedLocationCoordinates = null;
     this._updateLocationMiniStatus();
   }
 
@@ -9542,6 +9548,7 @@ export class StyleManager {
     // free-text destination has been superseded. Clearing only on a real id
     // leaves the search path's own _setActiveLocation(null) untouched.
     if (locationId) this._searchedLocationLabel = null;
+    if (locationId) this._searchedLocationCoordinates = null;
     this._locationPills.querySelectorAll('.location-pill').forEach(pill => {
       pill.classList.toggle('active', pill.dataset.locationId === locationId);
     });
@@ -9579,6 +9586,8 @@ export class StyleManager {
       city: this._activeLocationId ? CITY_POIS[this._activeLocationId] : null,
       currentPoi: this._currentPoi,
       searchedLabel: this._searchedLocationLabel,
+      searchedLatitude: this._searchedLocationCoordinates?.latitude,
+      searchedLongitude: this._searchedLocationCoordinates?.longitude,
       cameraHeading,
       enabledLayers: this._dataManager?.getEnabledLayerIds?.() || [],
       sources: [],
