@@ -254,6 +254,25 @@ test('new data proxies install the same routes in dev and preview servers', () =
   }
 });
 
+test('regional source configureServer installs middleware without returning a Vite post hook', () => {
+  const config = createViteConfig({ mode: 'test' });
+  const plugin = config.plugins.find(({ name }) => name === 'regional-source-proxy');
+  const installed = [];
+  const middlewares = {
+    use(...args) {
+      installed.push(args);
+      return this;
+    },
+  };
+
+  const result = plugin.configureServer({ middlewares });
+
+  assert.equal(result, undefined);
+  assert.equal(installed.length, 1);
+  assert.equal(installed[0][0], '/api/regional');
+  assert.equal(typeof installed[0][1], 'function');
+});
+
 test('Launch Library uses a 15-minute cache and optional server-side token header', () => {
   assert.equal(LL2_CACHE_TTL_MS, 15 * 60_000);
   assert.deepEqual(launchLibraryRequestHeaders(''), { Accept: 'application/json' });

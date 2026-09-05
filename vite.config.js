@@ -7406,7 +7406,9 @@ function weatherEffectsProxy() {
  * remain in process.env and are never defined for the browser bundle. */
 function regionalSourceProxy() {
   const middleware = createRegionalProxy();
-  const install = (server) => server.middlewares.use('/api/regional', middleware);
+  const install = (server) => {
+    server.middlewares.use('/api/regional', middleware);
+  };
   return {
     name: 'regional-source-proxy',
     configureServer: install,
