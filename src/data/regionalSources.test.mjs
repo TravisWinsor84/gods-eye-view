@@ -90,6 +90,7 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['vic-waste-facilities'].endpoint, 'https://discover.data.vic.gov.au/api/3/action/package_show?id=victoria-s-waste-and-resource-recovery-infrastructure-map-data');
   assert.equal(REGIONAL_SOURCES['vic-waste-facilities'].maxRows, 1_000);
   assert.match(REGIONAL_SOURCES['vic-waste-facilities'].refresh, /October 2025.*not.*currently operating/i);
+  assert.equal(REGIONAL_SOURCES['vic-waste-facilities'].credit, 'Victoria’s Waste and Recycling Infrastructure Map © Recycling Victoria 2023. Licensed under Creative Commons Attribution 4.0 International.');
   assert.equal(REGIONAL_SOURCES['vic-property-boundaries'].minZoom, 18);
   assert.equal(REGIONAL_SOURCES['vic-property-boundaries'].maxFeatures, 500);
   assert.match(REGIONAL_SOURCES['vic-property-boundaries'].refresh, /weekly.*not.*legal boundary/i);

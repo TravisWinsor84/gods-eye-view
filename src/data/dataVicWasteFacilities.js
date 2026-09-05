@@ -18,6 +18,7 @@ const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_PUBLIC_TEXT = 180;
 const DEFAULT_TIMEOUT_MS = 20_000;
 const CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1_000;
+const MAX_STALE_MS = 3 * 24 * 60 * 60 * 1_000;
 const SNAPSHOT_CAVEAT = 'October 2025 reference snapshot; inclusion does not imply the facility is currently operating.';
 
 function cleanText(value) {
@@ -63,9 +64,38 @@ async function readJsonCapped(response) {
   const mediaType = String(response.headers?.get?.('content-type') || '').split(';', 1)[0].trim().toLowerCase();
   if (mediaType !== 'application/json') throw new Error('invalid DataVic waste response');
   const declared = Number(response.headers?.get?.('content-length'));
-  if (Number.isFinite(declared) && declared > MAX_JSON_BYTES) throw new Error('DataVic waste response exceeded limit');
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > MAX_JSON_BYTES) throw new Error('DataVic waste response exceeded limit');
+  if (Number.isFinite(declared) && declared > MAX_JSON_BYTES) {
+    try { await response.body?.cancel?.(); } catch { /* best-effort connection teardown */ }
+    throw new Error('DataVic waste response exceeded limit');
+  }
+  const reader = response.body?.getReader?.();
+  if (!reader) throw new Error('invalid DataVic waste response');
+  const chunks = [];
+  let byteLength = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) throw new Error('invalid DataVic waste response');
+      byteLength += value.byteLength;
+      if (byteLength > MAX_JSON_BYTES) {
+        await reader.cancel();
+        throw new Error('DataVic waste response exceeded limit');
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* already cancelled or errored */ }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
@@ -85,6 +115,7 @@ export function dataVicWasteRequest({ offset, limit }) {
     offset: String(offset),
     limit: String(limit),
     fields: PUBLIC_FIELDS.join(','),
+    sort: '_id asc',
   }).toString();
   return url;
 }
@@ -182,6 +213,8 @@ export function createDataVicWasteFacilities({
   async function refresh() {
     const metadata = validateMetadata(await requestJson(METADATA_ENDPOINT));
     const rows = [];
+    let invalidRows = 0;
+    let rawRows = 0;
     let total = null;
     for (let offset = 0; total === null || offset < total; offset += MAX_PAGE_ROWS) {
       const payload = await requestJson(dataVicWasteRequest({ offset, limit: MAX_PAGE_ROWS }));
@@ -192,10 +225,13 @@ export function createDataVicWasteFacilities({
       } else if (page.total !== total) {
         throw new Error('invalid DataVic waste payload');
       }
+      const expectedRows = Math.min(MAX_PAGE_ROWS, total - offset);
+      if (payload.result.records.length !== expectedRows) throw new Error('invalid DataVic waste payload');
+      rawRows += payload.result.records.length;
       rows.push(...page.features);
-      if (payload.result.records.length === 0 && rows.length < total) throw new Error('invalid DataVic waste payload');
+      invalidRows += page.invalidRows;
     }
-    if (rows.length > total) throw new Error('invalid DataVic waste payload');
+    if (rawRows !== total || rows.length > total) throw new Error('invalid DataVic waste payload');
     const unique = new Map();
     let duplicateRows = 0;
     for (const feature of rows) {
@@ -214,7 +250,7 @@ export function createDataVicWasteFacilities({
       ...metadata,
       features,
       totalRows: total,
-      invalidRows: total - rows.length,
+      invalidRows,
       duplicateRows,
       cachedAt: now(),
     };
@@ -226,19 +262,28 @@ export function createDataVicWasteFacilities({
       if (!validBounds(bbox) || !Number.isSafeInteger(maxFeatures) || maxFeatures < 1 || maxFeatures > 1_000) {
         throw new Error('invalid DataVic waste query');
       }
-      const cache = cached && now() >= cached.cachedAt && now() - cached.cachedAt < CACHE_MAX_AGE_MS
+      let cache = cached && now() >= cached.cachedAt && now() - cached.cachedAt < CACHE_MAX_AGE_MS
         ? 'hit'
         : 'miss';
       if (cache === 'miss' && !refreshInFlight) {
         refreshInFlight = refresh().finally(() => { refreshInFlight = null; });
       }
-      const dataset = cache === 'hit' ? cached : await refreshInFlight;
+      let dataset;
+      try {
+        dataset = cache === 'hit' ? cached : await refreshInFlight;
+      } catch (error) {
+        if (!cached || now() < cached.cachedAt || now() - cached.cachedAt > MAX_STALE_MS) throw error;
+        dataset = cached;
+        cache = 'stale';
+      }
       const result = queryDataset(dataset, bbox, maxFeatures);
       return {
         type: 'FeatureCollection',
         features: result.features,
         sourceStatus: {
-          status: result.capped || dataset.invalidRows || dataset.duplicateRows ? 'partial' : 'current',
+          status: cache === 'stale'
+            ? 'stale'
+            : result.capped || dataset.invalidRows || dataset.duplicateRows ? 'partial' : 'current',
           capped: result.capped,
           totalRows: dataset.totalRows,
           indexedRows: dataset.features.length,

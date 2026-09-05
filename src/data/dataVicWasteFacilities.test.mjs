@@ -16,6 +16,7 @@ test('builds a fixed DataVic DataStore query without private facility fields', (
   assert.equal(url.searchParams.get('offset'), '100');
   assert.equal(url.searchParams.get('limit'), '200');
   assert.equal(url.searchParams.get('fields'), 'Facility Name,Facility Type,Infrastructure Type,Suburb,LGA,Latitude,Longitude');
+  assert.equal(url.searchParams.get('sort'), '_id asc');
   assert.doesNotMatch(url.searchParams.get('fields'), /Facility Owner|Address|_id/i);
   assert.throws(() => wasteModule.dataVicWasteRequest({ offset: -1, limit: 200 }), /invalid DataVic waste page/i);
   assert.throws(() => wasteModule.dataVicWasteRequest({ offset: 0, limit: 501 }), /invalid DataVic waste page/i);
@@ -184,4 +185,86 @@ test('coalesces concurrent cold loads into one metadata and page refresh', async
   assert.equal(metadataRequests, 1);
   assert.deepEqual(left.features, right.features);
   assert.equal(requests.length, 2);
+});
+
+test('reads JSON through the bounded stream path and cancels an oversized chunked body', async () => {
+  let cancelled = false;
+  const oversized = new Uint8Array(2 * 1024 * 1024 + 1);
+  const response = {
+    ok: true,
+    headers: { get(name) { return name.toLowerCase() === 'content-type' ? 'application/json' : null; } },
+    body: new ReadableStream({
+      pull(controller) { controller.enqueue(oversized); },
+      cancel() { cancelled = true; },
+    }),
+    async arrayBuffer() { throw new Error('unbounded arrayBuffer path called'); },
+  };
+  const client = wasteModule.createDataVicWasteFacilities({ fetchImpl: async () => response });
+  await assert.rejects(client.load({
+    bbox: { west: 144, south: -38, east: 146, north: -37 }, maxFeatures: 10,
+  }), /exceeded limit/i);
+  assert.equal(cancelled, true);
+});
+
+test('rejects a short non-final DataStore page instead of misreporting a skipped row as invalid', async () => {
+  const response = (value) => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+  const metadata = {
+    success: true,
+    result: {
+      id: '729d86ce-aae3-4f67-992c-3a7f8fa3823a',
+      name: 'victoria-s-waste-and-resource-recovery-infrastructure-map-data',
+      license_title: 'Creative Commons Attribution 4.0 International',
+      metadata_modified: '2026-02-06T21:59:51.870692',
+      resources: [{ id: 'e44f5d96-51e8-48ec-b674-299d100a0231', name: 'October 2025', format: 'CSV', datastore_active: true }],
+    },
+  };
+  const record = {
+    'Facility Name': 'Facility', 'Facility Type': 'Reprocessor', 'Infrastructure Type': 'Organics recycling',
+    Suburb: 'Melbourne', LGA: 'Melbourne', Latitude: '-37.81', Longitude: '144.96',
+  };
+  const client = wasteModule.createDataVicWasteFacilities({
+    fetchImpl: async (url) => {
+      if (String(url).includes('/package_show')) return response(metadata);
+      const offset = Number(new URL(url).searchParams.get('offset'));
+      return response({ success: true, result: { total: 663, records: Array.from({ length: offset === 0 ? 499 : 163 }, () => record) } });
+    },
+  });
+  await assert.rejects(client.load({
+    bbox: { west: 144, south: -38, east: 146, north: -37 }, maxFeatures: 10,
+  }), /invalid DataVic waste payload/i);
+});
+
+test('serves a failed refresh from last-good only inside the declared three-day ceiling', async () => {
+  let clock = Date.parse('2026-09-05T00:00:00Z');
+  let fail = false;
+  const response = (value) => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+  const metadata = {
+    success: true,
+    result: {
+      id: '729d86ce-aae3-4f67-992c-3a7f8fa3823a',
+      name: 'victoria-s-waste-and-resource-recovery-infrastructure-map-data',
+      license_title: 'Creative Commons Attribution 4.0 International', metadata_modified: '2026-02-06T21:59:51.870692',
+      resources: [{ id: 'e44f5d96-51e8-48ec-b674-299d100a0231', name: 'October 2025', format: 'CSV', datastore_active: true }],
+    },
+  };
+  const payload = { success: true, result: { total: 1, records: [{
+    'Facility Name': 'Last good', 'Facility Type': 'Reprocessor', 'Infrastructure Type': 'Organics recycling',
+    Suburb: 'Melbourne', LGA: 'Melbourne', Latitude: '-37.81', Longitude: '144.96',
+  }] } };
+  const client = wasteModule.createDataVicWasteFacilities({
+    now: () => clock,
+    fetchImpl: async (url) => {
+      if (fail) throw new Error('private upstream failure');
+      return response(String(url).includes('/package_show') ? metadata : payload);
+    },
+  });
+  const query = { bbox: { west: 144, south: -38, east: 146, north: -37 }, maxFeatures: 10 };
+  assert.equal((await client.load(query)).sourceStatus.status, 'current');
+  fail = true;
+  clock += 7 * 60 * 60 * 1_000;
+  const stale = await client.load(query);
+  assert.equal(stale.sourceStatus.status, 'stale');
+  assert.equal(stale.sourceStatus.cache, 'stale');
+  clock += 3 * 24 * 60 * 60 * 1_000;
+  await assert.rejects(client.load(query), /private upstream failure/);
 });

@@ -290,7 +290,7 @@ export const REGIONAL_SOURCES = Object.freeze({
     licence: 'Creative Commons Attribution 4.0 International', geometry: 'point', refreshMs: 21_600_000,
     maxStaleMs: 259_200_000,
     refresh: 'six-hour snapshot index; October 2025 reference inventory only, and inclusion does not imply a facility is currently operating',
-    credit: 'State of Victoria (DataVic), Victoria waste and resource recovery infrastructure map data, licensed under Creative Commons Attribution 4.0 International.',
+    credit: 'Victoria’s Waste and Recycling Infrastructure Map © Recycling Victoria 2023. Licensed under Creative Commons Attribution 4.0 International.',
     credential: 'none', runtimeEligible: true, maxFeatures: 1_000, maxRows: 1_000,
   }),
   'vic-property-boundaries': Object.freeze({
