@@ -174,7 +174,7 @@ function addGeometryEntity(dataSource, {
     };
     if (label) {
       entity.label = {
-        text: entity.name,
+        text: entity.name.length > 36 ? `${entity.name.slice(0, 35).trimEnd()}…` : entity.name,
         font: '600 13px sans-serif',
         fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.BLACK,
