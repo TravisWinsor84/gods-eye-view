@@ -75,6 +75,7 @@ import {
   validTerrainResult,
 } from './src/data/terrainHeightsProxy.js';
 import { createRegionalProxy } from './src/data/regionalProxy.js';
+import { createRegionalImageryProxy } from './src/data/regionalImageryProxy.js';
 import { VOICE_MODELS, isKnownVoiceTier, resolveVoiceModel } from './src/voice/voiceCost.js';
 
 /** Resolve __dirname for ESM context. */
@@ -7416,6 +7417,19 @@ function regionalSourceProxy() {
   };
 }
 
+/** Fixed-route PNG proxy for allow-listed Australian regional imagery. */
+function regionalImageryProxy() {
+  const middleware = createRegionalImageryProxy();
+  const install = (server) => {
+    server.middlewares.use('/api/regional-imagery', middleware);
+  };
+  return {
+    name: 'regional-imagery-proxy',
+    configureServer: install,
+    configurePreviewServer: install,
+  };
+}
+
 function parseJsonEnv(key, fallback) {
   const value = process.env[key];
   if (!value) return fallback;
@@ -7755,6 +7769,7 @@ export default defineConfig(({ mode }) => {
       overpassProxy(),
       militaryInstallationsProxy(),
       regionalSourceProxy(),
+      regionalImageryProxy(),
       regionalBriefProxy(),
       weatherEffectsProxy(),
       cctvProxy(),
