@@ -77,7 +77,7 @@
 - Modify: `vite.config.js`
 - Modify: `.env.example`
 
-**Interfaces:** Produces `createRegionalProxy()` at `/api/regional/<sourceId>`. It accepts a validated bounding box only; it consumes `PTV_DEVELOPER_ID`/`PTV_API_KEY` only for PTV. The browser never supplies an arbitrary upstream URL.
+**Interfaces:** Produces `createRegionalProxy()` at `/api/regional/<sourceId>`. It accepts a validated bounding box only; it consumes the server-only `TRANSPORT_VIC_OPEN_DATA_API_KEY` for Transport Victoria feeds. The browser never supplies an arbitrary upstream URL or credential.
 
 - [ ] **Step 1: Write failing proxy tests**
 
@@ -182,41 +182,57 @@
 - Modify: `src/data/regionalSources.js`
 - Modify: `src/data/regionalProxy.js`
 - Modify: `src/data/regionalPacks.js`
+- Create: `src/data/transportVicGtfs.js`
+- Create: `src/data/transportVicGtfs.test.mjs`
 - Modify: `.env.example`
 - Modify: `DATA_SOURCES.md`
+- Modify: `package.json`
+- Modify: `package-lock.json`
 
-**Interfaces:** `ptv-transit` is available only if `PTV_DEVELOPER_ID` and `PTV_API_KEY` exist. The proxy signs canonical PTV request paths with HMAC-SHA1, sanitizes all responses, and PTV is added to the Victoria pack only after configuration.
+**Interfaces:** `ptv-transit` uses Transport Victoria's current Open Data Portal GTFS-Realtime feeds and is available only if `TRANSPORT_VIC_OPEN_DATA_API_KEY` exists. The server sends the key only as `KeyID`, decodes full-feed Protocol Buffers for Metro Train, Yarra Trams, Metro/Regional Bus and V/Line vehicle positions, caches by provider feed rather than bbox, filters after decode, sanitizes all responses, and adds PTV to the Victoria pack only after configuration. Legacy PTV v3 developer-ID/HMAC credentials are explicitly out of scope because portal keys are not interchangeable with them.
 
-- [ ] **Step 1: Register PTV through Chrome and place the resulting values in the host `.env` with mode 600**
+- [ ] **Step 1: Register with the Transport Victoria Open Data Portal through Chrome and place the resulting key in the host `.env` with mode 600**
 
-    Verify presence, whitespace, length, and server-only availability. Never print either value.
+    Verify presence, whitespace, length, and server-only availability. Never print the value.
 
-- [ ] **Step 2: Write failing credential/signature tests**
+- [ ] **Step 2: Write failing credential, binary-decode and cache-boundary tests**
 
     test('reports credentials required when PTV keys are absent', async () => {
       const response = await request('/api/regional/ptv-transit');
       assert.equal(response.status, 424);
     });
 
-    test('signs canonical PTV paths', () => {
-      assert.match(makePtvSignature('/v3/route_types?devid=123', 'secret'), /^[a-f0-9]{40}$/);
+    test('sends the portal key only in the KeyID header', async () => {
+      await request('/api/regional/ptv-transit?west=144&south=-38&east=146&north=-37');
+      assert.equal(fetchCalls[0].options.headers.KeyID, 'secret-value');
+      assert.doesNotMatch(fetchCalls[0].url, /secret-value/);
     });
 
-- [ ] **Step 3: Implement signature, cache and source normalization; run focused tests**
+    test('reuses a decoded provider feed across different browser bboxes', async () => {
+      await request('/api/regional/ptv-transit?west=144&south=-38&east=145&north=-37');
+      await request('/api/regional/ptv-transit?west=145&south=-38&east=146&north=-37');
+      assert.equal(upstreamVehicleFeedCalls, 4);
+    });
 
-    Run: `node --test src/data/regionalSources.test.mjs src/data/regionalProxy.test.mjs src/data/regionalLayer.test.mjs`
+- [ ] **Step 3: Implement bounded binary decoding, provider-feed cache, bbox filtering and source normalization; run focused tests**
+
+    Use the current base `https://api.opendata.transport.vic.gov.au/opendata/public-transport/gtfs/realtime/v1` and the four `/{metro|tram|bus|vline}/vehicle-positions` paths. Send `Accept: application/x-protobuf`. Do not amplify provider requests by bbox. Apply source-specific binary byte caps only after measuring authenticated feeds.
+
+    Test missing/blank key 424 without fetch, exact header placement, no query/body leakage, upstream 401/403-to-424 mapping, protobuf decode failure isolation, feed cache reuse across bboxes, post-decode bbox filtering, per-mode partial failure, stale-age labeling, byte caps and sanitized errors.
+
+    Run: `node --test src/data/transportVicGtfs.test.mjs src/data/regionalSources.test.mjs src/data/regionalProxy.test.mjs src/data/regionalLayer.test.mjs`
     Expected: PASS.
 
-- [ ] **Step 4: Execute authenticated server-side smoke test without printing credentials**
+- [ ] **Step 4: Execute authenticated server-side smoke tests without printing credentials or bodies**
 
-    docker exec gods-eye-view node -e "fetch('http://127.0.0.1:4173/api/regional/ptv-transit').then(r => console.log(r.status))"
+    Record only status, response MIME type, byte count, decoded entity count, provider feed timestamp/age and whether `KeyID` succeeded for each mode. Observe rate-limit headers and confirm the same key works across all four feeds.
 
-    Expected: HTTP 200 and valid normalized features.
+    Expected: HTTP 200 and valid normalized vehicle features from at least one mode; partial mode outages remain explicit and sanitized.
 
 - [ ] **Step 5: Commit**
 
-    git add src/data/regionalSources.js src/data/regionalProxy.js src/data/regionalPacks.js .env.example DATA_SOURCES.md
-    git commit -m 'feat: add secure PTV transit source'
+    git add src/data/regionalSources.js src/data/regionalProxy.js src/data/regionalPacks.js src/data/transportVicGtfs.js src/data/transportVicGtfs.test.mjs .env.example DATA_SOURCES.md package.json package-lock.json
+    git commit -m 'feat: add secure Transport Victoria realtime transit'
 
 ### Task 5: Exhaustive research, paid-feed matrix, and production verification
 
