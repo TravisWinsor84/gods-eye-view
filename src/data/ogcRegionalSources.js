@@ -78,6 +78,18 @@ const OGC_FEATURE_SOURCES = Object.freeze({
     propertyName: 'geom,name,asset_cls,category,dis_access,label,published,vers_date,fac_type,type_',
     geometryTypes: Object.freeze(['Point']),
   }),
+  'vic-fire-context': Object.freeze({
+    endpoint: 'https://opendata.maps.vic.gov.au/geoserver/wfs',
+    typeName: 'open-data-platform:fire_history',
+    propertyName: 'geom,firetype,season,name,start_date,treatment_type,fire_severity,fire_cover,update_date,area_ha,cause,lead_agency,region',
+    geometryTypes: Object.freeze(['Polygon', 'MultiPolygon']),
+    maxInputCoordinatesPerFeature: 60_000,
+    maxInputCoordinatesPerResponse: 100_000,
+    maxOutputCoordinatesPerFeature: 60_000,
+    maxRingsPerFeature: 2_000,
+    maxTopologyComparisons: 20_000_000,
+    validateRingsOnly: true,
+  }),
 });
 
 export const OGC_SOURCE_CREDITS = Object.freeze({
@@ -91,6 +103,7 @@ export const OGC_SOURCE_CREDITS = Object.freeze({
   'vic-epa-priority-sites': 'State of Victoria (DataVic)',
   'vic-landfill-register': 'State of Victoria (DataVic)',
   'vic-recreation-assets': 'State of Victoria (DataVic)',
+  'vic-fire-context': 'State of Victoria (DataVic)',
 });
 
 function sourceConfig(sourceId) {
@@ -628,6 +641,26 @@ function publicProperties(sourceId, input) {
       ...(cleanText(input?.fac_type, 120) ? { facilityType: cleanText(input.fac_type, 120) } : {}),
       ...(cleanText(input?.type_, 120) ? { assetType: cleanText(input.type_, 120) } : {}),
       caveat: 'Public-land amenity inventory; inventory presence does not prove the asset is open or maintained.',
+    };
+  }
+  if (sourceId === 'vic-fire-context') {
+    const season = finiteNonNegative(input?.season);
+    const areaHa = finiteNonNegative(input?.area_ha);
+    return {
+      title: cleanText(input?.name, 180) || 'Victorian recorded fire extent',
+      sourceId, source: 'State of Victoria (DataVic)', freshnessClass: 'historical', referenceOnly: true, historical: true,
+      ...(cleanText(input?.firetype, 120) ? { fireType: cleanText(input.firetype, 120) } : {}),
+      ...(season === null ? {} : { season }),
+      ...(isoDate(input?.start_date) ? { startedAt: isoDate(input.start_date) } : {}),
+      ...(cleanText(input?.treatment_type, 180) ? { treatmentType: cleanText(input.treatment_type, 180) } : {}),
+      ...(cleanText(input?.fire_severity, 120) ? { fireSeverity: cleanText(input.fire_severity, 120) } : {}),
+      ...(cleanText(input?.fire_cover, 80) ? { fireCover: cleanText(input.fire_cover, 80) } : {}),
+      ...(isoDate(input?.update_date) ? { updatedAt: isoDate(input.update_date) } : {}),
+      ...(areaHa === null ? {} : { areaHa }),
+      ...(cleanText(input?.cause, 180) ? { cause: cleanText(input.cause, 180) } : {}),
+      ...(cleanText(input?.lead_agency, 120) ? { leadAgency: cleanText(input.lead_agency, 120) } : {}),
+      ...(cleanText(input?.region, 120) ? { region: cleanText(input.region, 120) } : {}),
+      caveat: 'Historical recorded fire extent only; not a current incident, warning, control line, access or safety source.',
     };
   }
   return {

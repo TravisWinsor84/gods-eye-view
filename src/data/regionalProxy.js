@@ -8,6 +8,8 @@ import { createIndexedRegionalDownloads, INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS } 
 import { createDataVicWasteFacilities } from './dataVicWasteFacilities.js';
 import { normalizeVicmapParcelPayload, vicmapParcelRequest } from './vicmapPropertyBoundaries.js';
 import { createVicWetlands2025Server } from '../../server/vicWetlands2025Server.js';
+import { createAihwHospitalEd } from './aihwHospitalEd.js';
+import { createTransportVicFreight } from './transportVicFreight.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -29,6 +31,7 @@ const OGC_SOURCE_IDS = new Set([
   'au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage',
   'vic-ev-chargers', 'vic-renewable-facilities', 'vic-flood-history-2022',
   'vic-epa-priority-sites', 'vic-landfill-register', 'vic-recreation-assets',
+  'vic-fire-context',
 ]);
 const INDEXED_SOURCE_IDS = new Set(INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS);
 const TRANSPORT_VIC_ROAD_SOURCE_IDS = new Set(['vic-road-unplanned', 'vic-lane-signals']);
@@ -37,61 +40,59 @@ const VICMAP_TIMEOUT_MS = 12_000;
 const MAX_GA_PAGES_PER_LAYER = 2;
 const GA_TIMEOUT_MS = 20_000;
 const GA_GAZETTEER_TIMEOUT_MS = 30_000;
+const CITY_RECORD_PAGE_SIZE = 100;
+const MELBOURNE_RECORD_SOURCES = Object.freeze({
+  'melbourne-trees': Object.freeze({
+    dataset: 'trees-with-species-and-dimensions-urban-forest', geoField: 'coordinatelocation', timeoutMs: 8_000,
+  }),
+  'melbourne-places': Object.freeze({
+    dataset: 'public-toilets', geoField: 'location', timeoutMs: 8_000,
+  }),
+});
 
 // These are server-owned query templates. They are deliberately separate from
 // the catalogue: the browser supplies only an approved source ID and bounded
 // request parameters (bbox, plus independently validated zoom for Vicmap).
 const SOURCE_TRANSPORT = Object.freeze({
-  'melbourne-trees': Object.freeze({
-    timeoutMs: 8_000,
-    url: (bbox, source) => cityRecordsUrl('trees-with-species-and-dimensions-urban-forest', bbox, source.maxFeatures),
-  }),
-  'melbourne-places': Object.freeze({
-    timeoutMs: 8_000,
-    url: (bbox, source) => cityRecordsUrl('public-toilets', bbox, source.maxFeatures),
-  }),
   'melbourne-cycling': Object.freeze({
     timeoutMs: 10_000,
-    url: (bbox, source) => cityGeoJsonUrl('bicycle-routes-including-informal-on-road-and-off-road-routes', bbox, source.maxFeatures),
+    maxResponseBytes: 2_000_000,
+    url: (bbox, source) => cityGeoJsonUrl('bicycle-routes-including-informal-on-road-and-off-road-routes', 'json_geometry', bbox, source.maxFeatures),
   }),
   'melbourne-water-history': Object.freeze({
     timeoutMs: 10_000,
-    url: (bbox, source) => cityGeoJsonUrl('water-flow-routes-over-land-urban-forest', bbox, source.maxFeatures),
-  }),
-  'vic-fire-context': Object.freeze({
-    timeoutMs: 12_000,
-    url: (bbox, source) => arcGisGeoJsonUrl('https://mapshare.vic.gov.au/arcgis/rest/services/Planning_Schemes/MapServer/0/query', bbox, source.maxFeatures),
-  }),
-  'vic-freight-network': Object.freeze({
-    timeoutMs: 12_000,
-    url: (bbox, source) => arcGisGeoJsonUrl('https://mapshare.vic.gov.au/arcgis/rest/services/Transport/MapServer/0/query', bbox, source.maxFeatures),
+    url: (bbox, source) => cityGeoJsonUrl('water-flow-routes-over-land-urban-forest', 'geo_shape', bbox, source.maxFeatures),
   }),
   'au-hydrology': Object.freeze({
     timeoutMs: 15_000,
-    url: (bbox, source) => arcGisGeoJsonUrl('https://awds.bom.gov.au/arcgis/rest/services/Geofabric/MapServer/0/query', bbox, source.maxFeatures),
+    url: (bbox, source) => arcGisGeoJsonUrl(
+      'https://hosting.wsapi.cloud.bom.gov.au/arcgis/rest/services/ahgf/Geofabric_V3x_All_Products/MapServer/24/query',
+      bbox, source.maxFeatures, 'name,hierarchy,perennial,srcftype',
+    ),
   }),
 });
 
-function cityRecordsUrl(dataset, bbox, limit) {
+function cityRecordsUrl(dataset, geoField, bbox, offset = 0) {
   const url = new URL(`https://data.melbourne.vic.gov.au/api/explore/v2.1/catalog/datasets/${dataset}/records`);
-  url.searchParams.set('where', `within_box(geo_point_2d, ${bbox.south}, ${bbox.west}, ${bbox.north}, ${bbox.east})`);
-  url.searchParams.set('limit', String(limit));
+  url.searchParams.set('where', `in_bbox(${geoField}, ${bbox.south}, ${bbox.west}, ${bbox.north}, ${bbox.east})`);
+  url.searchParams.set('limit', String(CITY_RECORD_PAGE_SIZE));
+  if (offset) url.searchParams.set('offset', String(offset));
   return url;
 }
 
-function cityGeoJsonUrl(dataset, bbox, limit) {
+function cityGeoJsonUrl(dataset, geoField, bbox, limit) {
   const url = new URL(`https://data.melbourne.vic.gov.au/api/explore/v2.1/catalog/datasets/${dataset}/exports/geojson`);
-  url.searchParams.set('where', `intersects(geo_shape, geom'POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},${bbox.east} ${bbox.north},${bbox.west} ${bbox.north},${bbox.west} ${bbox.south}))')`);
+  url.searchParams.set('where', `intersects(${geoField}, geom'POLYGON((${bbox.west} ${bbox.south},${bbox.east} ${bbox.south},${bbox.east} ${bbox.north},${bbox.west} ${bbox.north},${bbox.west} ${bbox.south}))')`);
   url.searchParams.set('limit', String(limit));
   return url;
 }
 
-function arcGisGeoJsonUrl(endpoint, bbox, limit) {
+function arcGisGeoJsonUrl(endpoint, bbox, limit, outFields = '*') {
   const url = new URL(endpoint);
   url.search = new URLSearchParams({
     f: 'geojson', where: '1=1', geometry: `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`,
     geometryType: 'esriGeometryEnvelope', inSR: '4326', spatialRel: 'esriSpatialRelIntersects',
-    outFields: '*', returnGeometry: 'true', resultRecordCount: String(limit),
+    outSR: '4326', outFields, returnGeometry: 'true', resultRecordCount: String(limit),
   }).toString();
   return url;
 }
@@ -194,7 +195,7 @@ function unavailableError(error) {
 }
 
 /** Create Vite middleware for the fixed, public regional-source allow-list. */
-export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, transportVicRoads, melbourneCivicClient, indexedRegionalDownloads, dataVicWasteFacilities, vicWetlands2025, env = process.env } = {}) {
+export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, transportVicRoads, melbourneCivicClient, indexedRegionalDownloads, dataVicWasteFacilities, vicWetlands2025, aihwHospitalEd, transportVicFreight, env = process.env } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   let activeRefreshes = 0;
@@ -248,6 +249,18 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
   const wetlandsClient = vicWetlands2025 || createVicWetlands2025Server({
     dataDir: env?.VIC_WETLANDS_2025_DATA_DIR,
   });
+  const hospitalEdClient = aihwHospitalEd || createAihwHospitalEd({
+    fetchImpl,
+    now,
+    withRequestSlot: withProviderRequestSlot,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
+  const freightClient = transportVicFreight || createTransportVicFreight({
+    fetchImpl,
+    now,
+    withRequestSlot: withProviderRequestSlot,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
 
   async function refresh(sourceId, source, bbox, zoom) {
     if (sourceId === 'vic-property-boundaries') {
@@ -277,6 +290,45 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     }
     if (MELBOURNE_CIVIC_SOURCE_IDS.has(sourceId)) {
       return civicClient.load(sourceId, { bbox, maxFeatures: source.maxFeatures });
+    }
+    if (Object.hasOwn(MELBOURNE_RECORD_SOURCES, sourceId)) {
+      const config = MELBOURNE_RECORD_SOURCES[sourceId];
+      const results = [];
+      let offset = 0;
+      let totalCount = null;
+      let totalBytes = 0;
+      while (results.length < source.maxFeatures && (totalCount === null || offset < totalCount)) {
+        const payload = await withProviderRequestSlot(async () => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs ?? config.timeoutMs);
+          try {
+            const response = await fetchImpl(cityRecordsUrl(config.dataset, config.geoField, bbox, offset), {
+              method: 'GET', headers: { Accept: 'application/json' }, signal: controller.signal, redirect: 'error',
+            });
+            if (!response?.ok) throw new Error('upstream failed');
+            return readJsonCapped(response, MAX_RESPONSE_BYTES);
+          } finally {
+            clearTimeout(timer);
+          }
+        });
+        if (!Number.isSafeInteger(payload?.total_count) || payload.total_count < 0
+          || !Array.isArray(payload?.results) || payload.results.length > CITY_RECORD_PAGE_SIZE) {
+          const error = new Error('invalid City of Melbourne response');
+          error.code = 'INVALID_JSON';
+          throw error;
+        }
+        totalBytes += new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+        if (totalBytes > MAX_RESPONSE_BYTES) {
+          const error = new Error('response too large');
+          error.code = 'RESPONSE_TOO_LARGE';
+          throw error;
+        }
+        totalCount = payload.total_count;
+        results.push(...payload.results.slice(0, source.maxFeatures - results.length));
+        if (payload.results.length < CITY_RECORD_PAGE_SIZE) break;
+        offset += payload.results.length;
+      }
+      return normalizeRegionalFeatureCollection(sourceId, { total_count: totalCount, results });
     }
     if (GA_SOURCE_IDS.has(sourceId)) {
       const initialRequests = gaArcGisRequests(sourceId, bbox, source.maxFeatures);
@@ -388,7 +440,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
           method: 'GET', headers: { Accept: 'application/json' }, signal: controller.signal, redirect: 'error',
         });
         if (!response?.ok) throw new Error('upstream failed');
-        const payload = await readJsonCapped(response, MAX_RESPONSE_BYTES);
+        const payload = await readJsonCapped(response, transport.maxResponseBytes ?? MAX_RESPONSE_BYTES);
         return normalizeRegionalFeatureCollection(sourceId, payload);
       } finally {
         clearTimeout(timer);
@@ -504,6 +556,38 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         const timedOut = error?.name === 'AbortError' || error?.code === 'TIMEOUT';
         return sendJson(res, timedOut ? 504 : 502, {
           error: timedOut ? 'regional source timed out' : 'regional source returned invalid data',
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
+      }
+    }
+    if (sourceId === 'au-hospital-ed-performance') {
+      try {
+        const payload = await hospitalEdClient.load({ bbox, maxFeatures: source.maxFeatures });
+        const body = normalizeRegionalFeatureCollection(sourceId, payload);
+        return sendJson(res, 200, body, {
+          'X-Regional-Source': sourceId, 'X-Regional-Status': 'fresh', 'X-Regional-Cache': 'MISS',
+        });
+      } catch (error) {
+        const timedOut = error?.code === 'TIMEOUT';
+        const invalid = ['SOURCE_LIMIT', 'INVALID_SOURCE_DATA', 'INVALID_SOURCE_QUERY'].includes(error?.code);
+        return sendJson(res, timedOut ? 504 : 502, {
+          error: timedOut ? 'regional source timed out'
+            : invalid ? 'regional source returned invalid data' : 'regional source is temporarily unavailable',
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
+      }
+    }
+    if (sourceId === 'vic-freight-network') {
+      try {
+        const payload = await freightClient.load({ bbox, maxFeatures: source.maxFeatures });
+        const body = normalizeRegionalFeatureCollection(sourceId, payload);
+        return sendJson(res, 200, body, {
+          'X-Regional-Source': sourceId, 'X-Regional-Status': 'fresh', 'X-Regional-Cache': 'MISS',
+        });
+      } catch (error) {
+        const timedOut = error?.code === 'TIMEOUT';
+        const invalid = ['SOURCE_LIMIT', 'INVALID_SOURCE_DATA', 'INVALID_SOURCE_METADATA', 'INVALID_SOURCE_QUERY'].includes(error?.code);
+        return sendJson(res, timedOut ? 504 : 502, {
+          error: timedOut ? 'regional source timed out'
+            : invalid ? 'regional source returned invalid data' : 'regional source is temporarily unavailable',
         }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
       }
     }
