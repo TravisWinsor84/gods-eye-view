@@ -14,7 +14,7 @@ import {
 } from './bloom.js';
 import { LOCATIONS, CITY_POIS, GLOBE_VIEW, flyToGlobeView, flyToPresetLocation, flyToPOI, searchAndFlyTo } from './locations.js';
 import { locationMiniStatus } from './locationStatus.js';
-import { buildMapContextFromUiState, renderMapContext } from './mapContextDom.js';
+import { buildMapContextFromUiState, collectRegionalSourceEntries, renderMapContext } from './mapContextDom.js';
 import { interruptCameraMotion } from './cameraVerbs.js';
 import {
   aircraftTrackingTarget,
@@ -2115,7 +2115,7 @@ export class StyleManager {
    * @param {Cesium.Viewer} viewer - The CesiumJS viewer instance.
    * @param {object} [options]
    */
-  constructor(viewer, { mapStackController = null } = {}) {
+  constructor(viewer, { mapStackController = null, regionalLayers = [] } = {}) {
     this.viewer = viewer;
     this.mapStackController = mapStackController;
     this.stages = {};
@@ -2377,6 +2377,7 @@ export class StyleManager {
     this._locationMiniCity = document.getElementById('location-mini-city');
     this._locationMiniPoi = document.getElementById('location-mini-poi');
     this._mapContextCard = document.getElementById('map-context-card');
+    this._regionalLayers = Array.isArray(regionalLayers) ? regionalLayers : [];
     this._safeFrameOverlay = document.getElementById('safe-frame-overlay');
     this._safeFrameBox = document.getElementById('safe-frame-box');
     this._activeLocationId = null;
@@ -9582,6 +9583,7 @@ export class StyleManager {
     const cameraHeading = Number.isFinite(headingRadians)
       ? Cesium.Math.toDegrees(headingRadians)
       : null;
+    const enabledLayers = this._dataManager?.getEnabledLayerIds?.() || new Set();
     const context = buildMapContextFromUiState({
       city: this._activeLocationId ? CITY_POIS[this._activeLocationId] : null,
       currentPoi: this._currentPoi,
@@ -9589,8 +9591,8 @@ export class StyleManager {
       searchedLatitude: this._searchedLocationCoordinates?.latitude,
       searchedLongitude: this._searchedLocationCoordinates?.longitude,
       cameraHeading,
-      enabledLayers: this._dataManager?.getEnabledLayerIds?.() || [],
-      sources: [],
+      enabledLayers,
+      sources: collectRegionalSourceEntries(this._regionalLayers, enabledLayers),
       cctvEnabled: !!this._cctvState?.enabled && !!this._dataManager?.isEnabled?.('cctv'),
       activeCctvCamera: this._cctvState?.activeCamera || null,
     });

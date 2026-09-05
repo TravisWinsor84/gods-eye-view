@@ -51,6 +51,89 @@ function ensureToggle(root) {
   return state;
 }
 
+function relativeAge(ageMs) {
+  if (!Number.isFinite(ageMs) || ageMs < 0) return '';
+  if (ageMs < 60_000) return 'less than a minute ago';
+  if (ageMs < 3_600_000) return `${Math.floor(ageMs / 60_000)}m ago`;
+  if (ageMs < 86_400_000) return `${Math.floor(ageMs / 3_600_000)}h ago`;
+  return `${Math.floor(ageMs / 86_400_000)}d ago`;
+}
+
+function renderSourceRows(root, sources) {
+  const list = field(root, '[data-map-context-sources]');
+  const documentRef = root?.ownerDocument;
+  if (!list?.replaceChildren || !documentRef?.createElement) return false;
+  const rows = [];
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const row = documentRef.createElement('li');
+    row.className = 'map-context-source-row';
+    row.setAttribute('data-status', text(source?.status, 'unknown'));
+
+    const name = documentRef.createElement('strong');
+    name.className = 'map-context-source-name';
+    name.textContent = text(source?.name, 'Source');
+    row.append(name);
+
+    const badge = documentRef.createElement('span');
+    badge.className = 'map-context-source-badge';
+    badge.textContent = [text(source?.freshnessClass), text(source?.status, 'unknown')]
+      .filter(Boolean).join(' · ').toUpperCase();
+    row.append(badge);
+
+    if (source?.observedAt) {
+      const time = documentRef.createElement('time');
+      time.className = 'map-context-source-age';
+      time.setAttribute('datetime', text(source.observedAt));
+      time.setAttribute('aria-label', `Observed ${text(source.observedAt)}`);
+      time.title = text(source.observedAt);
+      time.textContent = relativeAge(source.ageMs) || text(source.observedAt);
+      row.append(time);
+    }
+
+    const href = officialUrl(source?.officialUrl);
+    if (href) {
+      const link = documentRef.createElement('a');
+      link.className = 'map-context-source-link';
+      link.textContent = 'Official source';
+      link.setAttribute('href', href);
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener noreferrer');
+      row.append(link);
+    }
+
+    if (source?.error) {
+      const error = documentRef.createElement('span');
+      error.className = 'map-context-source-error';
+      error.textContent = text(source.error);
+      row.append(error);
+    }
+    rows.push(row);
+  }
+  list.replaceChildren(...rows);
+  list.hidden = rows.length === 0;
+  return rows.length > 0;
+}
+
+/** Read source-status rows from enabled regional layer modules without exposing manager internals. */
+export function collectRegionalSourceEntries(regionalLayers = [], enabledLayerIds = []) {
+  const enabled = enabledLayerIds instanceof Set ? enabledLayerIds : new Set(enabledLayerIds || []);
+  const bySource = new Map();
+  for (const layer of regionalLayers || []) {
+    if (!enabled.has(layer?.id) || typeof layer?.getStats !== 'function') continue;
+    let rows = [];
+    try {
+      rows = layer.getStats()?.sources || [];
+    } catch {
+      rows = [];
+    }
+    for (const source of rows) {
+      const sourceId = text(source?.sourceId).trim();
+      if (sourceId && !bySource.has(sourceId)) bySource.set(sourceId, source);
+    }
+  }
+  return [...bySource.values()];
+}
+
 /**
  * Translate the existing location-controller state into the pure context model.
  * @param {object} state Current preset/search/POI, camera, layer, and source state.
@@ -171,12 +254,16 @@ export function renderMapContext(root, context = {}) {
 
   const source = field(root, '[data-map-context-source]');
   const sourceSummary = text(context.sourceSummary, 'No active source provenance');
-  if (source) source.textContent = sourceSummary;
+  const hasSourceRows = renderSourceRows(root, context.sources);
+  if (source) {
+    source.textContent = sourceSummary;
+    source.hidden = hasSourceRows;
+  }
 
   const link = field(root, '[data-map-context-link]');
   const href = officialUrl(context.officialUrl);
   if (link) {
-    link.hidden = !href;
+    link.hidden = !href || hasSourceRows;
     if (href) {
       link.setAttribute('href', href);
       link.setAttribute('target', '_blank');

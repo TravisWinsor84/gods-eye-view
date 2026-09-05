@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMapContextFromUiState, renderMapContext } from './mapContextDom.js';
+import { readFileSync } from 'node:fs';
+import { buildMapContextFromUiState, collectRegionalSourceEntries, renderMapContext } from './mapContextDom.js';
 
-function makeElement() {
+function makeElement(tagName = 'div') {
   const element = {
+    tagName: tagName.toUpperCase(),
     hidden: false,
     textContent: '',
     title: '',
     attributes: {},
     listeners: {},
+    children: [],
     classList: {
       values: new Set(),
       toggle(name, force) {
@@ -21,6 +24,8 @@ function makeElement() {
     getAttribute(name) { return this.attributes[name] ?? null; },
     removeAttribute(name) { delete this.attributes[name]; },
     addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); },
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = [...children]; },
     click() { for (const listener of this.listeners.click || []) listener(); },
   };
   Object.defineProperty(element, 'innerHTML', {
@@ -31,6 +36,7 @@ function makeElement() {
 }
 
 function makeRoot() {
+  const ownerDocument = { createElement: (tagName) => makeElement(tagName) };
   const elements = {
     '[data-map-context-title]': makeElement(),
     '[data-map-context-heading]': makeElement(),
@@ -41,9 +47,11 @@ function makeRoot() {
     '[data-map-context-explanation]': makeElement(),
     '[data-map-context-coordinates]': makeElement(),
     '[data-map-context-source]': makeElement(),
+    '[data-map-context-sources]': makeElement('ul'),
     '[data-map-context-link]': makeElement(),
   };
   const root = makeElement();
+  root.ownerDocument = ownerDocument;
   root.querySelector = (selector) => elements[selector] || null;
   root.elements = elements;
   return root;
@@ -113,6 +121,20 @@ test('buildMapContextFromUiState preserves resolved free-text search coordinates
   assert.equal(context.accessibleTitle, 'Melbourne VIC, Australia');
   assert.equal(context.coordinates, '-37.8136, 144.9631');
   assert.equal(Object.hasOwn(context, 'heading'), false);
+});
+
+test('collectRegionalSourceEntries reads enabled packs and deduplicates compatibility overlap', () => {
+  const shared = { sourceId: 'melbourne-places', name: 'Melbourne Public Places', status: 'fresh' };
+  const layers = [
+    { id: 'regional-melbourne', getStats: () => ({ sources: [shared] }) },
+    { id: 'regional-civic', getStats: () => ({ sources: [shared, { sourceId: 'vic-waste-facilities', name: 'Waste facilities', status: 'stale' }] }) },
+    { id: 'regional-planning', getStats: () => ({ sources: [{ sourceId: 'vic-property-boundaries', name: 'Property boundaries', status: 'idle' }] }) },
+  ];
+
+  assert.deepEqual(
+    collectRegionalSourceEntries(layers, new Set(['regional-melbourne', 'regional-civic'])).map((source) => source.sourceId),
+    ['melbourne-places', 'vic-waste-facilities'],
+  );
 });
 
 test('renderMapContext presents a compact map summary by default', () => {
@@ -224,6 +246,37 @@ test('stale and unavailable source copy stays explicit in expanded details', () 
   assert.equal(root.classList.contains('is-stale'), true);
 });
 
+test('source details render as semantic rows with wrap-safe names, evidence, links and errors', () => {
+  const root = makeRoot();
+  renderMapContext(root, {
+    ...resolvedContext,
+    sources: [{
+      sourceId: 'vic-flood-history-2022',
+      name: 'Victorian Flood History - October 2022 Event Public',
+      status: 'stale',
+      freshnessClass: 'historical',
+      observedAt: '2022-11-01T00:00:00.000Z',
+      ageMs: 121_000,
+      error: 'Historical coverage is incomplete',
+      officialUrl: 'https://opendata.maps.vic.gov.au/',
+    }],
+  });
+
+  const list = root.elements['[data-map-context-sources]'];
+  assert.equal(list.tagName, 'UL');
+  assert.equal(list.children.length, 1);
+  const row = list.children[0];
+  assert.equal(row.tagName, 'LI');
+  assert.equal(row.children[0].textContent, 'Victorian Flood History - October 2022 Event Public');
+  assert.equal(row.children[1].textContent, 'HISTORICAL · STALE');
+  assert.equal(row.children[2].tagName, 'TIME');
+  assert.equal(row.children[2].getAttribute('datetime'), '2022-11-01T00:00:00.000Z');
+  assert.match(row.children[2].getAttribute('aria-label'), /2022-11-01T00:00:00.000Z/);
+  assert.equal(row.children[3].tagName, 'A');
+  assert.equal(row.children[3].getAttribute('href'), 'https://opendata.maps.vic.gov.au/');
+  assert.equal(row.children[4].textContent, 'Historical coverage is incomplete');
+});
+
 test('bearing is shown only for a finite heading', () => {
   const root = makeRoot();
   for (const heading of [Number.NaN, null, undefined, '15']) {
@@ -247,4 +300,14 @@ test('context data is assigned as text without parsing markup', () => {
 
   assert.equal(root.elements['[data-map-context-title]'].textContent, '<img src=x onerror=alert(1)>');
   assert.equal(root.elements['[data-map-context-explanation]'].textContent, '<script>alert(1)</script>');
+});
+
+test('static markup and CSS preserve a semantic wrap-safe source manifest at 320px', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  assert.match(html, /<ul[^>]+data-map-context-sources[^>]+aria-label="Active data sources"/);
+  assert.match(css, /\.map-context-source-name\s*\{[\s\S]*?overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.map-context-source-row\s*\{[\s\S]*?min-width:\s*0/);
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*?\.map-context-source-row\s*\{[\s\S]*?minmax\(0, 1fr\)/);
+  assert.match(css, /\.map-context-source-link\s*\{[\s\S]*?min-height:\s*1\.5rem/);
 });

@@ -1,12 +1,13 @@
 import * as Cesium from 'cesium';
 
-import { REGIONAL_SOURCES } from './regionalSources.js';
+import { REGIONAL_SOURCES, regionalSourceAvailability } from './regionalSources.js';
 
 export const REGIONAL_ENTITY_LIMIT = 1_500;
 export const REGIONAL_LABEL_LIMIT = 80;
 export const REGIONAL_MAX_VIEW_SPAN_DEG = 10;
 export const REGIONAL_MAX_CAMERA_HEIGHT_M = 2_000_000;
 const CAMERA_REFRESH_DELAY_MS = 75;
+const SOURCE_FRESHNESS_CLASSES = new Set(['live', 'recent', 'periodic', 'reference', 'historical', 'modelled']);
 
 function cleanId(value, fallback) {
   const text = String(value ?? '').trim();
@@ -226,6 +227,34 @@ function regionalModeIssue(modeStatus) {
     .join(', ');
 }
 
+function sourceFreshnessClass(sourceId, source) {
+  const explicit = String(source?.freshnessClass || '').trim().toLowerCase();
+  if (SOURCE_FRESHNESS_CLASSES.has(explicit)) return explicit;
+  const evidence = `${source?.refresh || ''} ${source?.sensitivityReview || ''}`.toLowerCase();
+  if (/historical|october 2022/.test(evidence)) return 'historical';
+  if (/modelled|modeled|forecast/.test(evidence)) return 'modelled';
+  if (/reference|inventory/.test(evidence)) return 'reference';
+  if (/live|real[- ]?time|vehicle position/.test(evidence)) return 'live';
+  const refreshMs = Number(source?.refreshMs);
+  if (Number.isFinite(refreshMs) && refreshMs > 0) {
+    if (refreshMs <= 5 * 60_000) return 'live';
+    if (refreshMs <= 24 * 60 * 60_000) return 'recent';
+    return 'periodic';
+  }
+  return null;
+}
+
+function newestObservedAt(payload) {
+  const candidates = [payload?.sourceStatus?.observedAt, payload?.observedAt];
+  for (const feature of payload?.features || []) candidates.push(feature?.properties?.observedAt);
+  let newest = null;
+  for (const candidate of candidates) {
+    const timestamp = Date.parse(String(candidate || ''));
+    if (Number.isFinite(timestamp) && (newest === null || timestamp > newest)) newest = timestamp;
+  }
+  return newest === null ? null : new Date(newest).toISOString();
+}
+
 /** Create one independently managed Cesium layer for a regional source pack. */
 export function createRegionalLayer({
   id,
@@ -240,9 +269,7 @@ export function createRegionalLayer({
   const sources = Object.freeze([...sourceIds]);
   for (const sourceId of sources) {
     const source = REGIONAL_SOURCES[sourceId];
-    if (!source?.runtimeEligible || source.credential !== 'none') {
-      throw new Error(`${id} cannot include unavailable or credentialed source: ${sourceId}`);
-    }
+    if (!source) throw new Error(`${id} cannot include unknown source: ${sourceId}`);
   }
 
   let dataSource = null;
@@ -334,6 +361,12 @@ export function createRegionalLayer({
       let results;
       try {
         results = await Promise.all(sources.map(async (sourceId) => {
+          if (!REGIONAL_SOURCES[sourceId].runtimeEligible) {
+            const availability = regionalSourceAvailability(sourceId);
+            const error = new Error(availability.reason || 'regional source is unavailable');
+            error.regionalStatus = availability.status;
+            return { sourceId, error };
+          }
           try {
             const response = await fetch(proxyUrl(sourceId, bounds), {
               method: 'GET',
@@ -497,6 +530,24 @@ export function createRegionalLayer({
 
     getStats() {
       const sourceErrors = Object.fromEntries(errorsBySource);
+      const now = Date.now();
+      const sourceEntries = destroyed ? [] : sources.map((sourceId) => {
+        const source = REGIONAL_SOURCES[sourceId];
+        const observedAt = newestObservedAt(lastGoodBySource.get(sourceId));
+        const sourceState = statusBySource.get(sourceId);
+        const availability = source.runtimeEligible ? null : regionalSourceAvailability(sourceId);
+        const error = availability?.reason || (sourceErrors[sourceId] ? 'regional source is temporarily unavailable' : null);
+        return Object.freeze({
+          sourceId,
+          name: source.name,
+          status: sourceState?.status || (enabled ? 'pending' : 'idle'),
+          freshnessClass: sourceFreshnessClass(sourceId, source),
+          observedAt,
+          ageMs: observedAt ? Math.max(0, now - Date.parse(observedAt)) : null,
+          error,
+          officialUrl: source.officialUrl || source.endpoint || null,
+        });
+      });
       return {
         count,
         lastUpdate,
@@ -504,6 +555,7 @@ export function createRegionalLayer({
         status,
         sourceErrors,
         sourceStatus: Object.fromEntries(statusBySource),
+        sources: sourceEntries,
       };
     },
   };

@@ -130,3 +130,32 @@ test('buildMapContext makes error and unavailable sources explicit', () => {
   assert.match(context.sourceSummary, /City cameras unavailable: Display terms not validated/);
   assert.equal(context.officialUrl, null);
 });
+
+test('context preserves evidenced freshness classes, exact time, age and sanitized errors per source', () => {
+  const now = Date.parse('2026-09-05T12:00:00Z');
+  const context = buildMapContext({
+    now,
+    sources: [
+      { sourceId: 'live', name: 'Live vehicles', status: 'current', freshnessClass: 'live', observedAt: '2026-09-05T11:59:00Z', officialUrl: 'https://transport.vic.gov.au/' },
+      { sourceId: 'recent', name: 'Recent facilities', status: 'partial', freshnessClass: 'recent', observedAt: '2026-09-05T10:00:00Z' },
+      { sourceId: 'reference', name: 'Reference boundaries', status: 'zoom-required', freshnessClass: 'reference' },
+      { sourceId: 'historical', name: 'Historical flood', status: 'stale', freshnessClass: 'historical', observedAt: '2022-11-01T00:00:00Z' },
+      { sourceId: 'modelled', name: 'Modelled layer', status: 'credentials-required', freshnessClass: 'modelled', error: '  API\u0000 key   required  ' },
+    ],
+  });
+
+  assert.deepEqual(context.sources.map((source) => source.freshnessClass), [
+    'live', 'recent', 'reference', 'historical', 'modelled',
+  ]);
+  assert.equal(context.sources[0].observedAt, '2026-09-05T11:59:00.000Z');
+  assert.equal(context.sources[0].ageMs, 60_000);
+  assert.equal(context.sources[2].ageMs, null);
+  assert.equal(context.sources[4].error, 'API key required');
+  assert.equal(context.sources[0].officialUrl, 'https://transport.vic.gov.au/');
+});
+
+test('context never invents a freshness class without timestamp or cadence evidence', () => {
+  const context = buildMapContext({ sources: [{ sourceId: 'unknown', name: 'Unknown source', status: 'current' }] });
+  assert.equal(context.sources[0].freshnessClass, null);
+  assert.equal(context.sources[0].ageMs, null);
+});

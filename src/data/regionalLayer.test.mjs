@@ -385,6 +385,7 @@ for (const outcome of ['resolution', 'rejection']) {
       status: 'idle',
       sourceErrors: {},
       sourceStatus: {},
+      sources: [],
     });
   });
 }
@@ -431,6 +432,59 @@ test('preserves sanitized credentials-required status from a 424 response', asyn
   assert.equal(layer.getStats().status, 'unavailable');
   assert.match(layer.getStats().error, /credentials required/);
   assert.doesNotMatch(layer.getStats().error, /HTTP 424/);
+});
+
+test('reports a known registration-gated category source without fetching it', async () => {
+  const { viewer } = viewerStub();
+  const layer = createRegionalLayer({
+    id: 'regional-environment',
+    sourceIds: ['vic-epa-air'],
+  });
+  let fetchCalls = 0;
+  await layer.init(viewer);
+  await layer.enable(viewer);
+  const updated = await withFetch(async () => {
+    fetchCalls += 1;
+    return response([]);
+  }, () => layer.update(viewer));
+  assert.equal(updated, false);
+  assert.equal(fetchCalls, 0);
+  assert.deepEqual(layer.getStats().sourceStatus, {
+    'vic-epa-air': { status: 'credentials-required', modes: {} },
+  });
+  assert.equal(layer.getStats().status, 'unavailable');
+  assert.match(layer.getStats().error, /EPA Victoria registration required/);
+  assert.deepEqual(layer.getStats().sources, [{
+    sourceId: 'vic-epa-air',
+    name: 'Victoria Air Quality',
+    status: 'credentials-required',
+    freshnessClass: null,
+    observedAt: null,
+    ageMs: null,
+    error: 'EPA Victoria registration required',
+    officialUrl: null,
+  }]);
+});
+
+test('getStats exposes per-source evidence without losing exact observation time', async () => {
+  const { viewer } = viewerStub();
+  const layer = createRegionalLayer({ id: 'regional-environment', sourceIds: ['vic-flood-history-2022'] });
+  await layer.init(viewer);
+  await layer.enable(viewer);
+  await withFetch(async () => response([{
+    ...pointFeature('flood-1', 144.96, -37.81),
+    properties: { observedAt: '2022-11-01T00:00:00Z' },
+  }]), () => layer.update(viewer));
+
+  const [source] = layer.getStats().sources;
+  assert.equal(source.sourceId, 'vic-flood-history-2022');
+  assert.equal(source.name, 'Victorian Flood History - October 2022 Event Public');
+  assert.equal(source.status, 'fresh');
+  assert.equal(source.freshnessClass, 'historical');
+  assert.equal(source.observedAt, '2022-11-01T00:00:00.000Z');
+  assert.ok(source.ageMs > 0);
+  assert.match(source.officialUrl, /^https:\/\//);
+  assert.equal(source.error, null);
 });
 
 test('credential denial clears prior PTV vehicles and repeated denial cannot resurrect them', async () => {
@@ -553,5 +607,5 @@ test('disable hides and detaches camera work while destroy removes the owned sou
 
   await layer.destroy(viewer);
   assert.deepEqual(removed, [{ dataSource: added[0], destroy: true }]);
-  assert.deepEqual(layer.getStats(), { count: 0, lastUpdate: null, error: null, status: 'idle', sourceErrors: {}, sourceStatus: {} });
+  assert.deepEqual(layer.getStats(), { count: 0, lastUpdate: null, error: null, status: 'idle', sourceErrors: {}, sourceStatus: {}, sources: [] });
 });

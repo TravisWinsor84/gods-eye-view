@@ -7,22 +7,58 @@ import {
   encodeLayerStateParams,
 } from './layerState.js';
 import { REGIONAL_SOURCES } from './regionalSources.js';
-import {
+import * as regionalPacksModule from './regionalPacks.js';
+
+const {
+  CATEGORY_REGIONAL_PACK_IDS,
   REGIONAL_PACKS,
   createRegionalPackDefinitions,
   regionalDataLayers,
   regionalPackIds,
-} from './regionalPacks.js';
+} = regionalPacksModule;
 
 const EXPECTED_PACK_IDS = [
   'regional-melbourne',
   'regional-victoria',
   'regional-australia',
+  'regional-civic',
+  'regional-mobility',
+  'regional-environment',
+  'regional-planning',
 ];
 
-test('defines exactly the three serializable regional pack IDs', () => {
+test('defines the three compatibility packs followed by four category packs', () => {
   assert.deepEqual(Object.keys(REGIONAL_PACKS), EXPECTED_PACK_IDS);
   assert.deepEqual(regionalDataLayers.map((layer) => layer.id), EXPECTED_PACK_IDS);
+  assert.deepEqual(CATEGORY_REGIONAL_PACK_IDS, [
+    'regional-civic', 'regional-mobility', 'regional-environment', 'regional-planning',
+  ]);
+});
+
+test('category packs assign every admitted source once by user-facing meaning', () => {
+  assert.deepEqual(regionalPackIds('regional-civic'), [
+    'au-emergency-facilities', 'au-health-facilities', 'au-public-toilets',
+    'melbourne-places', 'melbourne-drinking-fountains', 'melbourne-barbecues',
+    'vic-waste-facilities', 'au-hospital-ed-performance',
+  ]);
+  assert.deepEqual(regionalPackIds('regional-mobility'), [
+    'melbourne-cycling', 'melbourne-parking-live', 'vic-transport-stops', 'vic-ev-chargers',
+  ]);
+  assert.deepEqual(createRegionalPackDefinitions({ transportVicConfigured: true })['regional-mobility'].sourceIds, [
+    'melbourne-cycling', 'melbourne-parking-live', 'vic-transport-stops', 'vic-ev-chargers',
+    'ptv-transit',
+  ]);
+  assert.deepEqual(regionalPackIds('regional-environment'), [
+    'melbourne-trees', 'melbourne-water-history', 'au-dea-hotspots', 'vic-parks',
+    'vic-recreation-tracks', 'vic-renewable-facilities', 'vic-flood-history-2022',
+    'vic-epa-priority-sites', 'vic-landfill-register', 'vic-recreation-assets', 'vic-epa-air',
+  ]);
+  assert.deepEqual(regionalPackIds('regional-planning'), [
+    'au-place-names', 'vic-heritage', 'melbourne-development', 'melbourne-culture',
+    'vic-property-boundaries',
+  ]);
+  const categoryIds = CATEGORY_REGIONAL_PACK_IDS.flatMap((packId) => regionalPackIds(packId));
+  assert.equal(new Set(categoryIds).size, categoryIds.length);
 });
 
 test('Melbourne pack contains exactly the four approved no-account sources', () => {
@@ -35,7 +71,7 @@ test('Melbourne pack contains exactly the four approved no-account sources', () 
 });
 
 test('regional packs contain runtime sources and omit registered sources until configured', () => {
-  for (const packId of EXPECTED_PACK_IDS) {
+  for (const packId of ['regional-melbourne', 'regional-victoria', 'regional-australia']) {
     const sourceIds = regionalPackIds(packId);
     assert.ok(sourceIds.length > 0, `${packId} must not be empty`);
     for (const sourceId of sourceIds) {
@@ -65,7 +101,11 @@ test('all regional pack IDs survive the v2 share-state round trip and remain off
 
   assert.deepEqual(restored.enabledLayerIds.filter((id) => id.startsWith('regional-')), [
     'regional-australia',
+    'regional-civic',
+    'regional-environment',
     'regional-melbourne',
+    'regional-mobility',
+    'regional-planning',
     'regional-victoria',
   ]);
 });

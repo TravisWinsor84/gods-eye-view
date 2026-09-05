@@ -1,4 +1,6 @@
 const LABEL_CHARS_PER_LINE = 60;
+const SOURCE_ERROR_MAX_LENGTH = 180;
+const FRESHNESS_CLASSES = new Set(['live', 'recent', 'periodic', 'reference', 'historical', 'modelled']);
 
 function normalizeText(value) {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
@@ -49,8 +51,39 @@ function sourceName(source) {
 
 function sourceStatus(source) {
   if (source?.stale === true) return 'stale';
-  if (source?.available === false || normalizeText(source?.status).toLowerCase() === 'error') return 'unavailable';
-  return 'current';
+  const stated = normalizeText(source?.status).toLowerCase();
+  if (source?.available === false || stated === 'error') return 'unavailable';
+  if (stated === 'ok' || stated === 'fresh' || stated === 'active') return 'current';
+  return ['current', 'partial', 'stale', 'unavailable', 'credentials-required', 'zoom-required', 'pending', 'idle'].includes(stated)
+    ? stated
+    : 'current';
+}
+
+function normalizedObservedAt(value) {
+  const timestamp = Date.parse(normalizeText(value));
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function normalizeSource(source, nowMs) {
+  const observedAt = normalizedObservedAt(source?.observedAt);
+  const observedMs = observedAt ? Date.parse(observedAt) : null;
+  const claimedFreshness = normalizeText(source?.freshnessClass).toLowerCase();
+  const hasCadenceEvidence = normalizeText(source?.cadence ?? source?.refresh);
+  const freshnessClass = FRESHNESS_CLASSES.has(claimedFreshness)
+    && (observedAt || hasCadenceEvidence || ['reference', 'historical', 'modelled'].includes(claimedFreshness))
+    ? claimedFreshness
+    : null;
+  const error = normalizeText(source?.error ?? source?.reason).slice(0, SOURCE_ERROR_MAX_LENGTH) || null;
+  return Object.freeze({
+    sourceId: normalizeText(source?.sourceId ?? source?.id) || null,
+    name: sourceName(source) || 'Source',
+    status: sourceStatus(source),
+    freshnessClass,
+    observedAt,
+    ageMs: observedMs === null || !Number.isFinite(nowMs) ? null : Math.max(0, nowMs - observedMs),
+    error,
+    officialUrl: safeOfficialUrl(source?.officialUrl),
+  });
 }
 
 function describeSource(source) {
@@ -121,13 +154,25 @@ export function buildMapContext({
     ? [{ name: sourceName(selection), officialUrl: selection.officialUrl }]
     : [];
   const provenance = [...selectedSource, ...sourceList];
+  const nowMs = typeof _now === 'number' ? _now : Date.parse(_now);
+  const normalizedSources = provenance.map((source) => normalizeSource(source, nowMs));
   const officialUrl = provenance.map((source) => safeOfficialUrl(source.officialUrl)).find(Boolean) ?? null;
   const isStale = sourceList.some((source) => sourceStatus(source) === 'stale');
   const overlays = activeOverlayCount(enabledLayers);
   const sourceDescriptions = provenance.map(describeSource);
   const summaryParts = [];
   if (overlays) summaryParts.push(`${overlays} active overlay${overlays === 1 ? '' : 's'}`);
-  if (sourceDescriptions.length) summaryParts.push(sourceDescriptions.join('; '));
+  if (sourceDescriptions.length > 2) {
+    summaryParts.push(`${sourceDescriptions.length} sources`);
+    const staleCount = normalizedSources.filter((source) => source.status === 'stale').length;
+    const unavailableCount = normalizedSources.filter((source) => (
+      source.status === 'unavailable' || source.status === 'credentials-required'
+    )).length;
+    if (staleCount) summaryParts.push(`${staleCount} stale`);
+    if (unavailableCount) summaryParts.push(`${unavailableCount} unavailable`);
+  } else if (sourceDescriptions.length) {
+    summaryParts.push(sourceDescriptions.join('; '));
+  }
   const sourceSummary = summaryParts.join(' · ') || 'No active source provenance';
 
   const selectionLabel = normalizeText(selection?.label ?? selection?.name ?? selection?.title);
@@ -143,6 +188,7 @@ export function buildMapContext({
     coordinates,
     explanation,
     sourceSummary,
+    sources: normalizedSources,
     isStale,
     officialUrl,
   };
