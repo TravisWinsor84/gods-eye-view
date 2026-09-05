@@ -155,8 +155,8 @@ function encode(state) {
 
 test('production registry is exact, canonical, and rejects incomplete contracts', async () => {
   assert.equal(validateLayerStateRegistry(), true);
-  assert.equal(REGISTERED_LAYER_IDS.length, 23);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 23);
+  assert.equal(REGISTERED_LAYER_IDS.length, 24);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 24);
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),
@@ -184,6 +184,14 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   assert.equal(qaManager.layers.has('radio'), true);
   assert.equal(await qaManager.unregisterForQa('radio'), true);
   assert.equal(qaManager.layers.has('radio'), false);
+});
+
+test('DEA land-cover imagery is off by default and round-trips as enabled-only state', () => {
+  assert.equal(createDefaultLayerState().enabledLayerIds.includes('imagery-dea-land-cover'), false);
+  const state = normalizeLayerState({ enabledLayerIds: ['imagery-dea-land-cover'] });
+  const params = encodeLayerStateParams(new URLSearchParams('v=2'), state);
+  assert.equal(params.get('l'), 'v');
+  assert.deepEqual(decodeLayerStateParams(params).enabledLayerIds, ['imagery-dea-land-cover']);
 });
 
 test('v2 codec distinguishes absent from empty and keeps canonical deterministic ordering', () => {
