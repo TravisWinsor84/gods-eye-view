@@ -101,6 +101,13 @@ function renderSourceRows(root, sources) {
       row.append(link);
     }
 
+    if (source?.caveat) {
+      const caveat = documentRef.createElement('span');
+      caveat.className = 'map-context-source-caveat';
+      caveat.textContent = text(source.caveat);
+      row.append(caveat);
+    }
+
     if (source?.error) {
       const error = documentRef.createElement('span');
       error.className = 'map-context-source-error';

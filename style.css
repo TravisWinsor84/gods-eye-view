@@ -9686,6 +9686,7 @@ body.scene-playback-mode #key-setup {
 
 .map-context-source-age,
 .map-context-source-link,
+.map-context-source-caveat,
 .map-context-source-error {
   grid-column: 1 / -1;
   min-width: 0;
@@ -9700,6 +9701,11 @@ body.scene-playback-mode #key-setup {
 .map-context-source-link {
   width: fit-content;
   min-height: 1.5rem;
+}
+
+.map-context-source-caveat {
+  color: rgba(232, 234, 237, 0.68);
+  font: 0.62rem/1.4 var(--font-sans);
 }
 
 .map-context-source-error { color: #e4c58f; }

@@ -257,6 +257,7 @@ test('source details render as semantic rows with wrap-safe names, evidence, lin
       freshnessClass: 'historical',
       observedAt: '2022-11-01T00:00:00.000Z',
       ageMs: 121_000,
+      caveat: 'Historical mapped evidence only; not a current flood warning.',
       error: 'Historical coverage is incomplete',
       officialUrl: 'https://opendata.maps.vic.gov.au/',
     }],
@@ -274,7 +275,8 @@ test('source details render as semantic rows with wrap-safe names, evidence, lin
   assert.match(row.children[2].getAttribute('aria-label'), /2022-11-01T00:00:00.000Z/);
   assert.equal(row.children[3].tagName, 'A');
   assert.equal(row.children[3].getAttribute('href'), 'https://opendata.maps.vic.gov.au/');
-  assert.equal(row.children[4].textContent, 'Historical coverage is incomplete');
+  assert.equal(row.children[4].textContent, 'Historical mapped evidence only; not a current flood warning.');
+  assert.equal(row.children[5].textContent, 'Historical coverage is incomplete');
 });
 
 test('bearing is shown only for a finite heading', () => {

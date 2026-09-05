@@ -139,7 +139,7 @@ test('context preserves evidenced freshness classes, exact time, age and sanitiz
       { sourceId: 'live', name: 'Live vehicles', status: 'current', freshnessClass: 'live', observedAt: '2026-09-05T11:59:00Z', officialUrl: 'https://transport.vic.gov.au/' },
       { sourceId: 'recent', name: 'Recent facilities', status: 'partial', freshnessClass: 'recent', observedAt: '2026-09-05T10:00:00Z' },
       { sourceId: 'reference', name: 'Reference boundaries', status: 'zoom-required', freshnessClass: 'reference' },
-      { sourceId: 'historical', name: 'Historical flood', status: 'stale', freshnessClass: 'historical', observedAt: '2022-11-01T00:00:00Z' },
+      { sourceId: 'historical', name: 'Historical flood', status: 'stale', freshnessClass: 'historical', observedAt: '2022-11-01T00:00:00Z', caveat: '  Historical\u0000 evidence; not a current warning.  ' },
       { sourceId: 'modelled', name: 'Modelled layer', status: 'credentials-required', freshnessClass: 'modelled', error: '  API\u0000 key   required  ' },
     ],
   });
@@ -151,6 +151,7 @@ test('context preserves evidenced freshness classes, exact time, age and sanitiz
   assert.equal(context.sources[0].ageMs, 60_000);
   assert.equal(context.sources[2].ageMs, null);
   assert.equal(context.sources[4].error, 'API key required');
+  assert.equal(context.sources[3].caveat, 'Historical evidence; not a current warning.');
   assert.equal(context.sources[0].officialUrl, 'https://transport.vic.gov.au/');
 });
 

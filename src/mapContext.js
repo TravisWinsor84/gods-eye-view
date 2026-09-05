@@ -1,5 +1,6 @@
 const LABEL_CHARS_PER_LINE = 60;
 const SOURCE_ERROR_MAX_LENGTH = 180;
+const SOURCE_CAVEAT_MAX_LENGTH = 280;
 const FRESHNESS_CLASSES = new Set(['live', 'recent', 'periodic', 'reference', 'historical', 'modelled']);
 
 function normalizeText(value) {
@@ -74,6 +75,7 @@ function normalizeSource(source, nowMs) {
     ? claimedFreshness
     : null;
   const error = normalizeText(source?.error ?? source?.reason).slice(0, SOURCE_ERROR_MAX_LENGTH) || null;
+  const caveat = normalizeText(source?.caveat).slice(0, SOURCE_CAVEAT_MAX_LENGTH) || null;
   return Object.freeze({
     sourceId: normalizeText(source?.sourceId ?? source?.id) || null,
     name: sourceName(source) || 'Source',
@@ -82,6 +84,7 @@ function normalizeSource(source, nowMs) {
     observedAt,
     ageMs: observedMs === null || !Number.isFinite(nowMs) ? null : Math.max(0, nowMs - observedMs),
     error,
+    caveat,
     officialUrl: safeOfficialUrl(source?.officialUrl),
   });
 }
