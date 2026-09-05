@@ -85,15 +85,6 @@ function pointFrom(value) {
   return longitude === null || latitude === null ? null : [longitude, latitude];
 }
 
-function stableHash(value) {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
 function boundedDigest(value) {
   return [0x811c9dc5, 0x9e3779b9, 0x85ebca6b]
     .map((seed) => {
@@ -253,12 +244,7 @@ export function normalizeMelbourneParking(sensor, bay, { nowMs = Date.now() } = 
     freshnessClass: 'sensor-observation',
     caveat: 'Present or Unoccupied is a sensor observation only, not a guarantee that a bay is available or legal to use; check current street signs and conditions.',
   };
-  return {
-    type: 'Feature',
-    id: `melbourne-parking-${stableHash(`${String(sensor.kerbsideid)}|${coordinates.join(',')}`)}`,
-    geometry: { type: 'Point', coordinates },
-    properties,
-  };
+  return feature('melbourne-parking', 'sensor-bay', coordinates, properties);
 }
 
 const PARKING_INDEX_CELL_DEGREES = 0.05;
@@ -313,8 +299,7 @@ export function buildMelbourneParkingIndex(sensors, bays) {
 }
 
 export function queryMelbourneParkingIndex(index, bbox, { nowMs = Date.now(), maxFeatures = 1_000 } = {}) {
-  const features = [];
-  const seen = new Set();
+  const entriesByIdentity = new Map();
   const westCell = Math.floor(bbox.west / PARKING_INDEX_CELL_DEGREES);
   const eastCell = Math.floor(bbox.east / PARKING_INDEX_CELL_DEGREES);
   const southCell = Math.floor(bbox.south / PARKING_INDEX_CELL_DEGREES);
@@ -331,20 +316,31 @@ export function queryMelbourneParkingIndex(index, bbox, { nowMs = Date.now(), ma
       }
     }
   }
-  let capped = false;
-  outer: for (const entries of candidateCells) {
+  for (const entries of candidateCells) {
     for (const entry of entries) {
       if (!inBounds(entry.coordinates, bbox)) continue;
       const normalized = normalizeMelbourneParking(entry.sensor, entry.bay, { nowMs });
-      if (!normalized || seen.has(normalized.id)) continue;
-      seen.add(normalized.id);
-      if (features.length >= maxFeatures) {
-        capped = true;
-        break outer;
-      }
-      features.push(normalized);
+      if (!normalized) continue;
+      const identity = String(entry.sensor.kerbsideid);
+      if (!entriesByIdentity.has(identity)) entriesByIdentity.set(identity, { identity, normalized });
     }
   }
+  const groups = new Map();
+  const uniqueEntries = [...entriesByIdentity.values()];
+  for (const entry of uniqueEntries) {
+    if (!groups.has(entry.normalized.id)) groups.set(entry.normalized.id, []);
+    groups.get(entry.normalized.id).push(entry);
+  }
+  const features = [];
+  for (const [baseId, entries] of groups) {
+    entries.sort((left, right) => left.identity.localeCompare(right.identity));
+    for (let index = 0; index < entries.length && features.length < maxFeatures; index += 1) {
+      entries[index].normalized.id = index === 0 ? baseId : `${baseId}-${index + 1}`;
+      features.push(entries[index].normalized);
+    }
+    if (features.length >= maxFeatures) break;
+  }
+  const capped = uniqueEntries.length > maxFeatures;
   return { type: 'FeatureCollection', features, capped };
 }
 

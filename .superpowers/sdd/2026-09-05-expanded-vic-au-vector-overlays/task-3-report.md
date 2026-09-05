@@ -80,7 +80,7 @@ Melbourne bbox: west `144.9`, south `-37.9`, east `145`, north `-37.8`.
 | Public barbecues | 44 | current | 1 bounded record page |
 | Parking sensors/bays | 1,000 | partial/capped | 2 provider-wide exports |
 | Development activity | 1,000 | partial/capped | 10 bounded record pages |
-| Culture | 319 | current | 3 bounded artwork record pages + 1 memorial export |
+| Culture | 319 | current | 2 bounded artwork record pages + 1 memorial export |
 
 The parking downloads contained 6,324 sensors and 5,072 bays with non-null
 join keys. The sampled/capped Melbourne response had maximum
@@ -180,7 +180,7 @@ was performed. Independent re-review remains the next gate.
   coordinates and fixed source/dataset names. Opaque keys remain internal to
   deduplication and ordering; identical public projections receive stable
   ordinal suffixes after opaque-key sorting.
-- The current culture retrieval contract is three bounded outdoor-artwork
+- The observed culture retrieval used two bounded outdoor-artwork
   record pages plus one bounded, cached provider-wide memorial JSON export.
 - Focused Task 3 plus shared proxy/GA/PTV concurrency suites: 116 passed, 0
   failed.
@@ -189,6 +189,31 @@ was performed. Independent re-review remains the next gate.
   on Node 26.8.1.
 - `npm run build`: passed; Vite transformed 162 modules.
 - `git diff --check`: passed.
+
+No pack membership, push, deployment, account, credential or provider mutation
+was performed. Independent re-review remains the next gate.
+
+### Fresh verification after fix round 4
+
+- RED-first regressions showed 20,000 enumerable `kerbsideid` candidates each
+  produced a distinct public parking ID under the old implementation.
+- Parking public-ID bases now digest only normalized returned properties,
+  coordinates and fixed source metadata. `kerbsideid` remains internal to the
+  sensor/bay join, true-source deduplication and collision-group ordering; it
+  is never emitted or hashed into a public ID.
+- Distinct parking rows with identical public projections receive stable
+  ordinal suffixes after internal key ordering, while a repeated source row is
+  emitted once.
+- The observed 319-feature culture smoke made exactly two bounded artwork
+  record requests plus one bounded, cached provider-wide memorial JSON export.
+- Restoring the projection-based implementation passed the focused Melbourne
+  civic suite 29/29. The final six-suite Task 3/shared proxy/GA/PTV command
+  passed 118/118.
+- Full `npm test` passed 2,840 tests with 0 failures and 1 expected skip. The
+  skipped allocation microbenchmarks remain calibrated for Node 24;
+  verification ran on Node 26.8.1.
+- `npm run build` passed; Vite transformed 162 modules.
+- `git diff --check` passed.
 
 No pack membership, push, deployment, account, credential or provider mutation
 was performed. Independent re-review remains the next gate.

@@ -175,3 +175,17 @@
   memorial export contract. Focused tests passed 116/116; full `npm test`
   passed 2,838 with 0 failures and 1 expected Node-version skip; production
   build passed at 162 modules; `git diff --check` passed.
+- Task 3 re-review 3 confirmed the civic projection/ordinal implementation but
+  found the separate parking ID still hashed enumerable `kerbsideid`, plus two
+  report statements overstating the observed artwork request count.
+- Task 3 fix round 4/5 adds RED-first parking regressions over 20,000 candidate
+  keys and identical-public-projection collisions. Parking ID bases now digest
+  only normalized public properties, coordinates and fixed source metadata;
+  `kerbsideid` remains internal to joining, deduplication and stable ordinal
+  ordering. The report now records the observed culture request shape as two
+  artwork record pages plus one memorial export.
+- The old key-derived parking-ID mutation failed the two new regressions with
+  20,000 enumerable IDs and non-ordinal collision IDs; the restored focused
+  civic suite passed 29/29. Final focused verification passed 118/118, full
+  `npm test` passed 2,840 with 0 failures and 1 expected Node-version skip, and
+  the production build passed at 162 modules; `git diff --check` passed.

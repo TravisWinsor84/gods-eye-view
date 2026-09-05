@@ -90,8 +90,57 @@ test('parking retains exact timestamps and caveats without promising availabilit
   assert.equal('kerbsideid' in feature.properties, false);
   assert.equal('zone_number' in feature.properties, false);
   assert.equal('roadsegmentid' in feature.properties, false);
-  assert.match(feature.id, /^melbourne-parking-[a-f0-9]{8}$/);
+  assert.match(feature.id, /^melbourne-parking-[a-f0-9]{24}$/);
   assert.deepEqual(feature.geometry.coordinates, [144.9647, -37.8138]);
+});
+
+test('parking public IDs cannot identify an enumerable kerbside key', () => {
+  const publicSensor = sensor({ location: { lon: 144.95, lat: -37.85 } });
+  const publicBay = bay({ location: { lon: 144.95, lat: -37.85 } });
+  const observedId = normalizeMelbourneParking(
+    { ...publicSensor, kerbsideid: 17212 },
+    { ...publicBay, kerbsideid: 17212 },
+    { nowMs: NOW },
+  ).id;
+  const enumeratedIds = new Set(Array.from({ length: 20_000 }, (_, offset) => {
+    const candidate = offset + 1;
+    return normalizeMelbourneParking(
+      { ...publicSensor, kerbsideid: candidate },
+      { ...publicBay, kerbsideid: candidate },
+      { nowMs: NOW },
+    ).id;
+  }));
+
+  assert.equal(enumeratedIds.size, 1, 'kerbside candidates cannot select distinct public IDs');
+  assert.ok(enumeratedIds.has(observedId), 'enumeration cannot distinguish the observed kerbside key');
+  assert.doesNotMatch(observedId, /17212/);
+});
+
+test('identical public parking records use stable ordinal IDs while repeated kerbside rows deduplicate', () => {
+  const sensors = [
+    sensor({ kerbsideid: 30, location: { lon: 144.95, lat: -37.85 } }),
+    sensor({ kerbsideid: 20, location: { lon: 144.95, lat: -37.85 } }),
+    sensor({ kerbsideid: 20, location: { lon: 144.95, lat: -37.85 } }),
+    sensor({ kerbsideid: 10, location: { lon: 144.95, lat: -37.85 } }),
+  ];
+  const bays = [
+    bay({ kerbsideid: 20, location: { lon: 144.95, lat: -37.85 } }),
+    bay({ kerbsideid: 30, location: { lon: 144.95, lat: -37.85 } }),
+    bay({ kerbsideid: 10, location: { lon: 144.95, lat: -37.85 } }),
+  ];
+  const run = (sensorRows, bayRows) => queryMelbourneParkingIndex(
+    buildMelbourneParkingIndex(sensorRows, bayRows), BBOX, { nowMs: NOW, maxFeatures: 10 },
+  );
+
+  const forward = run(sensors, bays);
+  const reverse = run([...sensors].reverse(), [...bays].reverse());
+  assert.equal(forward.features.length, 3);
+  assert.deepEqual(forward.features.map(({ id }) => id), reverse.features.map(({ id }) => id));
+  assert.match(forward.features[0].id, /^melbourne-parking-[a-f0-9]{24}$/);
+  assert.equal(forward.features[1].id, `${forward.features[0].id}-2`);
+  assert.equal(forward.features[2].id, `${forward.features[0].id}-3`);
+  assert.equal(forward.capped, false);
+  assert.doesNotMatch(JSON.stringify(forward), /kerbsideid/);
 });
 
 test('parking freshness is evaluated per sensor observation after five minutes', () => {
