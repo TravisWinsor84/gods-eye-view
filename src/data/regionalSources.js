@@ -284,6 +284,15 @@ export const REGIONAL_SOURCES = Object.freeze({
     credit: 'Source: Department of Transport and Planning Victoria, Public Transport Lines and Stops, licensed under Creative Commons Attribution 4.0.',
     credential: 'none', runtimeEligible: true, maxFeatures: 1_000, maxRows: 40_000,
   }),
+  'vic-waste-facilities': Object.freeze({
+    name: 'Victorian Waste and Resource Recovery Facilities', source: 'DataVic', publisher: 'Recycling Victoria',
+    endpoint: 'https://discover.data.vic.gov.au/api/3/action/package_show?id=victoria-s-waste-and-resource-recovery-infrastructure-map-data',
+    licence: 'Creative Commons Attribution 4.0 International', geometry: 'point', refreshMs: 21_600_000,
+    maxStaleMs: 259_200_000,
+    refresh: 'six-hour snapshot index; October 2025 reference inventory only, and inclusion does not imply a facility is currently operating',
+    credit: 'State of Victoria (DataVic), Victoria waste and resource recovery infrastructure map data, licensed under Creative Commons Attribution 4.0 International.',
+    credential: 'none', runtimeEligible: true, maxFeatures: 1_000, maxRows: 1_000,
+  }),
   'ptv-transit': Object.freeze({
     name: 'Transport Victoria Realtime Transit', source: 'Transport Victoria Open Data Portal', publisher: 'Public Transport Victoria',
     endpoint: 'https://opendata.transport.vic.gov.au/dataset/gtfs-realtime', licence: 'Creative Commons Attribution 4.0 International',

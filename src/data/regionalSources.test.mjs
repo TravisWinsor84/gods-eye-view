@@ -39,6 +39,7 @@ test('registry declares the approved regional source IDs with immutable source c
     'melbourne-culture',
     'au-public-toilets',
     'vic-transport-stops',
+    'vic-waste-facilities',
     'ptv-transit',
     'au-hospital-ed-performance',
   ]);
@@ -85,6 +86,9 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(REGIONAL_SOURCES['vic-transport-stops'].endpoint, 'https://opendata.transport.vic.gov.au/api/3/action/package_show?id=public-transport-lines-and-stops');
   assert.equal(REGIONAL_SOURCES['vic-transport-stops'].maxRows, 40_000);
   assert.match(REGIONAL_SOURCES['vic-transport-stops'].refresh, /reference.*not realtime/i);
+  assert.equal(REGIONAL_SOURCES['vic-waste-facilities'].endpoint, 'https://discover.data.vic.gov.au/api/3/action/package_show?id=victoria-s-waste-and-resource-recovery-infrastructure-map-data');
+  assert.equal(REGIONAL_SOURCES['vic-waste-facilities'].maxRows, 1_000);
+  assert.match(REGIONAL_SOURCES['vic-waste-facilities'].refresh, /October 2025.*not.*currently operating/i);
   assert.ok(Number.isInteger(REGIONAL_SOURCES['melbourne-trees'].maxFeatures));
 });
 

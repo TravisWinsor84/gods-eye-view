@@ -118,6 +118,30 @@ test('regional proxy delegates indexed downloads globally across bboxes and surf
   assert.equal(second.headers['x-regional-cache'], 'HIT');
 });
 
+test('regional proxy delegates the fixed DataVic waste snapshot and reports its cache state', async () => {
+  const calls = [];
+  const middleware = createRegionalProxy({
+    dataVicWasteFacilities: {
+      async load(options) {
+        calls.push(options);
+        return {
+          type: 'FeatureCollection', features: [],
+          sourceStatus: { status: 'partial', cache: 'hit', snapshot: 'October 2025' },
+        };
+      },
+    },
+  });
+  const response = await invokeRegional(middleware, `/api/regional/vic-waste-facilities${MELBOURNE_BOUNDS}`);
+  assert.deepEqual(calls, [{
+    bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 },
+    maxFeatures: 1_000,
+  }]);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-cache'], 'HIT');
+  assert.equal(response.headers['x-regional-status'], 'degraded');
+  assert.equal(JSON.parse(response.body).sourceStatus.snapshot, 'October 2025');
+});
+
 test('regional proxy maps indexed partial, stale, limit, invalid and unavailable states honestly', async () => {
   const states = [
     [{ sourceStatus: { status: 'partial', cache: 'miss' } }, 200, 'degraded', 'MISS'],

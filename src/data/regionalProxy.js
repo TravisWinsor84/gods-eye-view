@@ -4,6 +4,7 @@ import { createTransportVicGtfs } from './transportVicGtfs.js';
 import { createMelbourneCivicClient } from './melbourneCivicSources.js';
 import { OGC_MAX_RESPONSE_BYTES, normalizeOgcPayload, ogcFeatureRequest } from './ogcRegionalSources.js';
 import { createIndexedRegionalDownloads, INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS } from './indexedRegionalDownloads.js';
+import { createDataVicWasteFacilities } from './dataVicWasteFacilities.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -177,7 +178,7 @@ function unavailableError(error) {
 }
 
 /** Create Vite middleware for the fixed, public regional-source allow-list. */
-export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, melbourneCivicClient, indexedRegionalDownloads, env = process.env } = {}) {
+export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, melbourneCivicClient, indexedRegionalDownloads, dataVicWasteFacilities, env = process.env } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   let activeRefreshes = 0;
@@ -211,6 +212,12 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   });
   const indexedClient = indexedRegionalDownloads || createIndexedRegionalDownloads({
+    fetchImpl,
+    now,
+    withRequestSlot: withProviderRequestSlot,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
+  const wasteClient = dataVicWasteFacilities || createDataVicWasteFacilities({
     fetchImpl,
     now,
     withRequestSlot: withProviderRequestSlot,
@@ -372,6 +379,24 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         }
         return sendJson(res, error?.code === 'TIMEOUT' ? 504 : 502, {
           error: error?.code === 'TIMEOUT' ? 'regional source timed out' : 'regional source is temporarily unavailable',
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
+      }
+    }
+    if (sourceId === 'vic-waste-facilities') {
+      try {
+        const body = await wasteClient.load({ bbox, maxFeatures: source.maxFeatures });
+        const sourceStatus = body?.sourceStatus || {};
+        const status = sourceStatus.status === 'current' ? 'fresh' : 'degraded';
+        const cache = cleanIndexedCacheHeader(sourceStatus.cache);
+        return sendJson(res, 200, body, {
+          'X-Regional-Source': sourceId,
+          'X-Regional-Status': status,
+          ...(cache ? { 'X-Regional-Cache': cache } : {}),
+        });
+      } catch (error) {
+        const timedOut = error?.name === 'AbortError' || error?.code === 'TIMEOUT';
+        return sendJson(res, timedOut ? 504 : 502, {
+          error: timedOut ? 'regional source timed out' : 'regional source returned invalid data',
         }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
       }
     }
