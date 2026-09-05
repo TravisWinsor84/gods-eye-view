@@ -151,6 +151,10 @@ export const DATA_CREDITS = [
     html: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.',
   },
   {
+    key: 'vic-property-boundaries',
+    html: 'State of Victoria (DataVic), Vicmap Property — licensed under Creative Commons Attribution 4.0 International.',
+  },
+  {
     key: 'au-emergency-facilities',
     html: GA_SOURCE_CREDITS['au-emergency-facilities'],
   },

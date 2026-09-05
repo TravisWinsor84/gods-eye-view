@@ -74,7 +74,7 @@ function invokeRegional(middleware, url, { method = 'GET' } = {}) {
 }
 
 const MELBOURNE_BOUNDS = '?west=144.9&south=-37.9&east=145.0&north=-37.8';
-const MELBOURNE_BLOCK_BOUNDS = '?west=144.96&south=-37.815&east=144.965&north=-37.811';
+const MELBOURNE_BLOCK_BOUNDS = '?west=144.96&south=-37.815&east=144.965&north=-37.811&zoom=18';
 const { transit_realtime: transitRealtime } = GtfsRealtimeBindings;
 
 function regionalTransitFeed() {
@@ -192,7 +192,7 @@ test('regional proxy asks for a closer Vicmap viewport without calling the provi
   let fetchCalls = 0;
   const response = await invokeRegional(createRegionalProxy({
     fetchImpl: async () => { fetchCalls += 1; return regionalResponseJson({}); },
-  }), `/api/regional/vic-property-boundaries${MELBOURNE_BOUNDS}`);
+  }), `/api/regional/vic-property-boundaries${MELBOURNE_BOUNDS}&zoom=18`);
   assert.equal(fetchCalls, 0);
   assert.equal(response.status, 200);
   assert.equal(response.headers['x-regional-status'], 'zoom-required');
@@ -200,6 +200,66 @@ test('regional proxy asks for a closer Vicmap viewport without calling the provi
     type: 'FeatureCollection', features: [],
     sourceStatus: { status: 'zoom-required', capped: false, reason: 'Zoom in to level 18 or closer to view parcel boundaries.' },
   });
+});
+
+test('regional proxy independently requires a valid Vicmap zoom parameter', async () => {
+  let fetchCalls = 0;
+  const middleware = createRegionalProxy({
+    fetchImpl: async () => { fetchCalls += 1; return regionalResponseJson({}); },
+  });
+  for (const [suffix, status, regionalStatus] of [
+    ['', 200, 'zoom-required'],
+    ['&zoom=17.5', 200, 'zoom-required'],
+    ['&zoom=not-a-number', 400, 'invalid-request'],
+    ['&zoom=31', 400, 'invalid-request'],
+  ]) {
+    const response = await invokeRegional(middleware, `/api/regional/vic-property-boundaries?west=144.96&south=-37.815&east=144.965&north=-37.811${suffix}`);
+    assert.equal(response.status, status);
+    assert.equal(response.headers['x-regional-source'], 'vic-property-boundaries');
+    assert.equal(response.headers['x-regional-status'], regionalStatus);
+  }
+  assert.equal(fetchCalls, 0);
+});
+
+test('regional proxy preserves zoom-required status for Vicmap overflow on MISS and HIT', async () => {
+  let fetchCalls = 0;
+  const feature = {
+    type: 'Feature', properties: { OBJECTID: 1 }, geometry: { type: 'Polygon', coordinates: [[
+      [144.961, -37.813], [144.962, -37.813], [144.962, -37.812], [144.961, -37.813],
+    ]] },
+  };
+  const middleware = createRegionalProxy({
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: Array.from({ length: 501 }, (_, index) => ({
+          ...feature, properties: { OBJECTID: index + 1 },
+        })),
+      });
+    },
+  });
+  const miss = await invokeRegional(middleware, `/api/regional/vic-property-boundaries${MELBOURNE_BLOCK_BOUNDS}`);
+  const hit = await invokeRegional(middleware, `/api/regional/vic-property-boundaries${MELBOURNE_BLOCK_BOUNDS}`);
+  assert.equal(fetchCalls, 1);
+  assert.equal(miss.headers['x-regional-status'], 'zoom-required');
+  assert.equal(miss.headers['x-regional-cache'], 'MISS');
+  assert.equal(hit.headers['x-regional-status'], 'zoom-required');
+  assert.equal(hit.headers['x-regional-cache'], 'HIT');
+  assert.equal(JSON.parse(hit.body).sourceStatus.status, 'zoom-required');
+});
+
+test('regional proxy reports malformed Vicmap geometry as source-scoped invalid data', async () => {
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => regionalResponseJson({
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [144.96, -37.81] } }],
+    }),
+  }), `/api/regional/vic-property-boundaries${MELBOURNE_BLOCK_BOUNDS}`);
+  assert.equal(response.status, 502);
+  assert.equal(response.headers['x-regional-source'], 'vic-property-boundaries');
+  assert.equal(response.headers['x-regional-status'], 'invalid-data');
+  assert.deepEqual(JSON.parse(response.body), { error: 'regional source returned invalid data' });
 });
 
 test('regional proxy maps indexed partial, stale, limit, invalid and unavailable states honestly', async () => {

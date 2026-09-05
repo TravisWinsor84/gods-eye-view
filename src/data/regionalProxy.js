@@ -14,6 +14,7 @@ const MAX_BOUNDS_WIDTH = 10;
 // callers still coalesce, and an expired last-good entry can still be served.
 const MAX_CONCURRENT_UPSTREAM_REFRESHES = 4;
 const ALLOWED_QUERY_KEYS = new Set(['west', 'south', 'east', 'north']);
+const VICMAP_ALLOWED_QUERY_KEYS = new Set([...ALLOWED_QUERY_KEYS, 'zoom']);
 const GA_SOURCE_IDS = new Set(['au-emergency-facilities', 'au-health-facilities', 'au-place-names']);
 const MELBOURNE_CIVIC_SOURCE_IDS = new Set([
   'melbourne-drinking-fountains',
@@ -35,7 +36,8 @@ const GA_TIMEOUT_MS = 20_000;
 const GA_GAZETTEER_TIMEOUT_MS = 30_000;
 
 // These are server-owned query templates. They are deliberately separate from
-// the catalogue: the browser supplies only an approved source ID and a bbox.
+// the catalogue: the browser supplies only an approved source ID and bounded
+// request parameters (bbox, plus independently validated zoom for Vicmap).
 const SOURCE_TRANSPORT = Object.freeze({
   'melbourne-trees': Object.freeze({
     timeoutMs: 8_000,
@@ -97,8 +99,8 @@ function finiteCoordinate(value, min, max) {
   return Number.isFinite(number) && number >= min && number <= max ? number : null;
 }
 
-function parseBounds(url) {
-  for (const key of url.searchParams.keys()) if (!ALLOWED_QUERY_KEYS.has(key)) return null;
+function parseBounds(url, allowedKeys = ALLOWED_QUERY_KEYS) {
+  for (const key of url.searchParams.keys()) if (!allowedKeys.has(key)) return null;
   const west = finiteCoordinate(url.searchParams.get('west'), -180, 180);
   const south = finiteCoordinate(url.searchParams.get('south'), -90, 90);
   const east = finiteCoordinate(url.searchParams.get('east'), -180, 180);
@@ -106,6 +108,15 @@ function parseBounds(url) {
   if ([west, south, east, north].some((value) => value === null)
     || west >= east || south >= north || east - west > MAX_BOUNDS_WIDTH || north - south > MAX_BOUNDS_WIDTH) return null;
   return { west, south, east, north };
+}
+
+function parseVicmapZoom(url) {
+  const values = url.searchParams.getAll('zoom');
+  if (values.length === 0 || values[0] === '') return { status: 'zoom-required' };
+  if (values.length !== 1 || !/^(?:\d+\.?\d*|\.\d+)$/.test(values[0])) return { status: 'invalid-request' };
+  const zoom = Number(values[0]);
+  if (!Number.isFinite(zoom) || zoom > 30) return { status: 'invalid-request' };
+  return zoom < 18 ? { status: 'zoom-required' } : { status: 'valid', zoom };
 }
 
 function requestSourceId(pathname) {
@@ -226,7 +237,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   });
 
-  async function refresh(sourceId, source, bbox) {
+  async function refresh(sourceId, source, bbox, zoom) {
     if (sourceId === 'vic-property-boundaries') {
       return withProviderRequestSlot(async () => {
         const controller = new AbortController();
@@ -236,7 +247,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
           controller.abort(error);
         }, timeoutMs ?? VICMAP_TIMEOUT_MS);
         try {
-          const response = await fetchImpl(vicmapParcelRequest(bbox), {
+          const response = await fetchImpl(vicmapParcelRequest(bbox, zoom), {
             method: 'GET', headers: { Accept: 'application/geo+json, application/json' }, signal: controller.signal, redirect: 'error',
           });
           if (!response?.ok) throw new Error('upstream failed');
@@ -246,7 +257,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
             error.code = 'INVALID_MEDIA_TYPE';
             throw error;
           }
-          return normalizeVicmapParcelPayload(await readJsonCapped(response, 2_000_000));
+          return normalizeVicmapParcelPayload(await readJsonCapped(response, 2_000_000), { bbox });
         } finally {
           clearTimeout(timer);
         }
@@ -388,8 +399,25 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         ...(source.availabilityReason ? { reason: availability.reason } : {}),
       }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': availability.status });
     }
-    const bbox = parseBounds(url);
+    const isVicmap = sourceId === 'vic-property-boundaries';
+    const bbox = parseBounds(url, isVicmap ? VICMAP_ALLOWED_QUERY_KEYS : ALLOWED_QUERY_KEYS);
     if (!bbox) return sendJson(res, 400, { error: 'invalid regional bounds' });
+    let vicmapZoom;
+    if (isVicmap) {
+      const parsedZoom = parseVicmapZoom(url);
+      if (parsedZoom.status === 'zoom-required') {
+        return sendJson(res, 200, {
+          type: 'FeatureCollection', features: [],
+          sourceStatus: { status: 'zoom-required', capped: false, reason: 'Zoom in to level 18 or closer to view parcel boundaries.' },
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'zoom-required' });
+      }
+      if (parsedZoom.status === 'invalid-request') {
+        return sendJson(res, 400, { error: 'invalid regional zoom' }, {
+          'X-Regional-Source': sourceId, 'X-Regional-Status': 'invalid-request',
+        });
+      }
+      vicmapZoom = parsedZoom.zoom;
+    }
     const serverApiKey = source.credentialEnv
       ? String(env?.[source.credentialEnv] || '').trim()
       : '';
@@ -461,7 +489,8 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
       const sourceStatus = existing.body?.sourceStatus?.status;
       return sendJson(res, 200, existing.body, {
         'X-Regional-Source': sourceId,
-        'X-Regional-Status': sourceStatus && sourceStatus !== 'current' ? 'degraded' : 'fresh',
+        'X-Regional-Status': isVicmap && sourceStatus === 'zoom-required'
+          ? 'zoom-required' : sourceStatus && sourceStatus !== 'current' ? 'degraded' : 'fresh',
         'X-Regional-Cache': 'HIT',
       });
     }
@@ -472,7 +501,7 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         return sendJson(res, 503, { error: 'regional source is temporarily unavailable' }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'saturated' });
       }
       activeRefreshes += 1;
-      pending = refresh(sourceId, source, bbox).then((body) => {
+      pending = refresh(sourceId, source, bbox, vicmapZoom).then((body) => {
         cache.delete(key);
         cache.set(key, { body, cachedAt: now() });
         while (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
@@ -488,7 +517,8 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
       const sourceStatus = body?.sourceStatus?.status;
       return sendJson(res, 200, body, {
         'X-Regional-Source': sourceId,
-        'X-Regional-Status': sourceStatus && sourceStatus !== 'current' ? 'degraded' : 'fresh',
+        'X-Regional-Status': isVicmap && sourceStatus === 'zoom-required'
+          ? 'zoom-required' : sourceStatus && sourceStatus !== 'current' ? 'degraded' : 'fresh',
         'X-Regional-Cache': 'MISS',
       });
     } catch (error) {
@@ -505,6 +535,21 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'outside-coverage' });
       }
       if (canServeLastGood()) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
+      if (isVicmap) {
+        const invalid = error?.code === 'RESPONSE_TOO_LARGE'
+          || error?.code === 'INVALID_JSON'
+          || error?.code === 'INVALID_MEDIA_TYPE'
+          || String(error?.code || '').startsWith('INVALID_VICMAP')
+          || String(error?.message || '').startsWith('invalid Vicmap')
+          || String(error?.message || '').includes('Vicmap geometry exceeded limit');
+        if (invalid) return sendJson(res, 502, { error: 'regional source returned invalid data' }, {
+          'X-Regional-Source': sourceId, 'X-Regional-Status': 'invalid-data',
+        });
+        const status = unavailableError(error);
+        return sendJson(res, status, {
+          error: status === 504 ? 'regional source timed out' : 'regional source is temporarily unavailable',
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
+      }
       if (error?.code === 'RESPONSE_TOO_LARGE') return sendJson(res, 502, { error: 'regional source response was too large' });
       if (['INVALID_JSON', 'INVALID_GA_RESPONSE', 'INVALID_MEDIA_TYPE', 'INVALID_OGC_RESPONSE', 'INVALID_OGC_GEOMETRY', 'OGC_FEATURE_LIMIT', 'OGC_COORDINATE_LIMIT', 'OGC_NESTING_LIMIT', 'OGC_TOPOLOGY_LIMIT'].includes(error?.code)
         || error?.message === 'source unavailable') return sendJson(res, 502, { error: 'regional source returned invalid data' });
