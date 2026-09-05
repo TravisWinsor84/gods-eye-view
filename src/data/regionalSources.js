@@ -293,6 +293,15 @@ export const REGIONAL_SOURCES = Object.freeze({
     credit: 'State of Victoria (DataVic), Victoria waste and resource recovery infrastructure map data, licensed under Creative Commons Attribution 4.0 International.',
     credential: 'none', runtimeEligible: true, maxFeatures: 1_000, maxRows: 1_000,
   }),
+  'vic-property-boundaries': Object.freeze({
+    name: 'Vicmap Property Parcel Boundaries', source: 'DataVic', publisher: 'State of Victoria',
+    endpoint: 'https://services-ap1.arcgis.com/P744lA0wf4LlBZ84/ArcGIS/rest/services/Vicmap_Parcel/FeatureServer/0',
+    licence: 'Creative Commons Attribution 4.0 International', geometry: 'polygon', refreshMs: 86_400_000,
+    maxStaleMs: 604_800_000, minZoom: 18,
+    refresh: 'weekly REST catalogue cadence; high-zoom reference parcel geometry only, not a survey or legal boundary determination',
+    credit: 'State of Victoria (DataVic), Vicmap Property, licensed under Creative Commons Attribution 4.0 International.',
+    credential: 'none', runtimeEligible: true, maxFeatures: 500,
+  }),
   'ptv-transit': Object.freeze({
     name: 'Transport Victoria Realtime Transit', source: 'Transport Victoria Open Data Portal', publisher: 'Public Transport Victoria',
     endpoint: 'https://opendata.transport.vic.gov.au/dataset/gtfs-realtime', licence: 'Creative Commons Attribution 4.0 International',

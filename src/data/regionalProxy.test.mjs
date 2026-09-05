@@ -74,6 +74,7 @@ function invokeRegional(middleware, url, { method = 'GET' } = {}) {
 }
 
 const MELBOURNE_BOUNDS = '?west=144.9&south=-37.9&east=145.0&north=-37.8';
+const MELBOURNE_BLOCK_BOUNDS = '?west=144.96&south=-37.815&east=144.965&north=-37.811';
 const { transit_realtime: transitRealtime } = GtfsRealtimeBindings;
 
 function regionalTransitFeed() {
@@ -140,6 +141,48 @@ test('regional proxy delegates the fixed DataVic waste snapshot and reports its 
   assert.equal(response.headers['x-regional-cache'], 'HIT');
   assert.equal(response.headers['x-regional-status'], 'degraded');
   assert.equal(JSON.parse(response.body).sourceStatus.snapshot, 'October 2025');
+});
+
+test('regional proxy fetches only a fixed high-zoom Vicmap parcel query and strips provider IDs', async () => {
+  const requests = [];
+  const middleware = createRegionalProxy({
+    fetchImpl: async (url) => {
+      requests.push(String(url));
+      return regionalResponseJson({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature', id: 9,
+          geometry: { type: 'Polygon', coordinates: [[
+            [144.96, -37.811], [144.961, -37.811], [144.961, -37.812], [144.96, -37.811],
+          ]] },
+          properties: { OBJECTID: 9, parcel_spi: '1\\PS1', parcel_status: 'A', parcel_task_id: 'private-workflow' },
+        }],
+      });
+    },
+  });
+  const response = await invokeRegional(middleware, `/api/regional/vic-property-boundaries${MELBOURNE_BLOCK_BOUNDS}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'fresh');
+  assert.equal(requests.length, 1);
+  const request = new URL(requests[0]);
+  assert.equal(request.pathname, '/P744lA0wf4LlBZ84/ArcGIS/rest/services/Vicmap_Parcel/FeatureServer/0/query');
+  assert.equal(request.searchParams.get('resultRecordCount'), '501');
+  assert.doesNotMatch(request.searchParams.get('outFields'), /task_id|address|owner/i);
+  assert.doesNotMatch(response.body, /OBJECTID|private-workflow|parcel_task_id/i);
+});
+
+test('regional proxy asks for a closer Vicmap viewport without calling the provider', async () => {
+  let fetchCalls = 0;
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async () => { fetchCalls += 1; return regionalResponseJson({}); },
+  }), `/api/regional/vic-property-boundaries${MELBOURNE_BOUNDS}`);
+  assert.equal(fetchCalls, 0);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'zoom-required');
+  assert.deepEqual(JSON.parse(response.body), {
+    type: 'FeatureCollection', features: [],
+    sourceStatus: { status: 'zoom-required', capped: false, reason: 'Zoom in to level 18 or closer to view parcel boundaries.' },
+  });
 });
 
 test('regional proxy maps indexed partial, stale, limit, invalid and unavailable states honestly', async () => {

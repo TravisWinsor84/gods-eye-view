@@ -5,6 +5,7 @@ import { createMelbourneCivicClient } from './melbourneCivicSources.js';
 import { OGC_MAX_RESPONSE_BYTES, normalizeOgcPayload, ogcFeatureRequest } from './ogcRegionalSources.js';
 import { createIndexedRegionalDownloads, INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS } from './indexedRegionalDownloads.js';
 import { createDataVicWasteFacilities } from './dataVicWasteFacilities.js';
+import { normalizeVicmapParcelPayload, vicmapParcelRequest } from './vicmapPropertyBoundaries.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -28,6 +29,7 @@ const OGC_SOURCE_IDS = new Set([
 ]);
 const INDEXED_SOURCE_IDS = new Set(INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS);
 const OGC_TIMEOUT_MS = 20_000;
+const VICMAP_TIMEOUT_MS = 12_000;
 const MAX_GA_PAGES_PER_LAYER = 2;
 const GA_TIMEOUT_MS = 20_000;
 const GA_GAZETTEER_TIMEOUT_MS = 30_000;
@@ -225,6 +227,31 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
   });
 
   async function refresh(sourceId, source, bbox) {
+    if (sourceId === 'vic-property-boundaries') {
+      return withProviderRequestSlot(async () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => {
+          const error = new Error('timeout');
+          error.code = 'TIMEOUT';
+          controller.abort(error);
+        }, timeoutMs ?? VICMAP_TIMEOUT_MS);
+        try {
+          const response = await fetchImpl(vicmapParcelRequest(bbox), {
+            method: 'GET', headers: { Accept: 'application/geo+json, application/json' }, signal: controller.signal, redirect: 'error',
+          });
+          if (!response?.ok) throw new Error('upstream failed');
+          const contentType = response.headers?.get?.('content-type') || '';
+          if (!/^application\/(?:geo\+json|(?:[a-z0-9!#$&^_.+-]+\+)?json)(?:\s*;|$)/i.test(contentType)) {
+            const error = new Error('invalid provider media type');
+            error.code = 'INVALID_MEDIA_TYPE';
+            throw error;
+          }
+          return normalizeVicmapParcelPayload(await readJsonCapped(response, 2_000_000));
+        } finally {
+          clearTimeout(timer);
+        }
+      });
+    }
     if (MELBOURNE_CIVIC_SOURCE_IDS.has(sourceId)) {
       return civicClient.load(sourceId, { bbox, maxFeatures: source.maxFeatures });
     }
@@ -463,6 +490,18 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         'X-Regional-Cache': 'MISS',
       });
     } catch (error) {
+      if (sourceId === 'vic-property-boundaries' && error?.code === 'VICMAP_ZOOM_REQUIRED') {
+        return sendJson(res, 200, {
+          type: 'FeatureCollection', features: [],
+          sourceStatus: { status: 'zoom-required', capped: false, reason: 'Zoom in to level 18 or closer to view parcel boundaries.' },
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'zoom-required' });
+      }
+      if (sourceId === 'vic-property-boundaries' && error?.code === 'OUTSIDE_VICMAP_COVERAGE') {
+        return sendJson(res, 200, {
+          type: 'FeatureCollection', features: [],
+          sourceStatus: { status: 'outside-coverage', capped: false, reason: 'Viewport is outside Victoria.' },
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'outside-coverage' });
+      }
       if (canServeLastGood()) return sendJson(res, 200, existing.body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'stale', 'X-Regional-Cache': 'STALE' });
       if (error?.code === 'RESPONSE_TOO_LARGE') return sendJson(res, 502, { error: 'regional source response was too large' });
       if (['INVALID_JSON', 'INVALID_GA_RESPONSE', 'INVALID_MEDIA_TYPE', 'INVALID_OGC_RESPONSE', 'INVALID_OGC_GEOMETRY', 'OGC_FEATURE_LIMIT', 'OGC_COORDINATE_LIMIT', 'OGC_NESTING_LIMIT', 'OGC_TOPOLOGY_LIMIT'].includes(error?.code)
