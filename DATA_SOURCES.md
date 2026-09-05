@@ -38,13 +38,14 @@ How to read this:
 | **Radio Browser** | Geolocated internet-radio station directory and station-level tags | Public-domain directory data under PDDL 1.0; individual broadcaster stream terms apply | "Radio Browser" plus a link to the selected broadcaster |
 | **Re:Earth Terrain** (Mapterhorn) | Terrain (keyless globe stacks — OSM etc. — + `/api/terrain/heights` ellipsoidal-height lookups) | Terrain mesh: CC BY 4.0; geoid: EGM2008 (NGA, public domain) | "Terrain (keyless globe stacks): Re:Earth Terrain / Mapterhorn (CC BY 4.0) / EGM2008 (NGA)" |
 
-### Victorian and Australian regional catalogue (registered contracts; not yet active)
+### Victorian and Australian regional catalogue
 
-These source contracts are catalogue metadata only. No browser fetches, Vite
-routes, keys, or layers have been enabled by this entry. A later proxy task
-must validate the specific dataset endpoint, terms, payload cap, timeout, and
-cache behaviour before it is activated. Any credential remains server-side;
-none is documented here.
+This table contains both implemented regional sources and deliberately gated
+catalogue-only candidates. Runtime-eligible entries are served through the
+allow-listed regional proxy and category layers described below. Entries marked
+not runtime eligible have no browser fetch, request template, proxy transport or
+pack membership. Any provider credential remains server-side and is documented
+only after its authenticated contract has been validated.
 
 | Source ID | Official publisher and endpoint | Licence / terms | Exact attribution | Geometry | Refresh model |
 |-----------|---------------------------------|-----------------|-------------------|----------|---------------|

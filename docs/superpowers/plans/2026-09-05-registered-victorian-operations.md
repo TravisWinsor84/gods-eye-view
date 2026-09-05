@@ -154,7 +154,7 @@ git commit -m 'feat: add Victorian freeway operations'
 - Modify: `.env.example`
 - Modify: `DATA_SOURCES.md`
 
-**Interfaces:** Activates `vic-epa-air` only after `EPA_VIC_API_KEY`, exact subscribed endpoint, schema, quota and terms are verified. Missing credentials remain 424 and the source remains absent from default category membership until then.
+**Interfaces:** Activates `vic-epa-air` only after the provider-documented key variable and header contract, exact subscribed endpoint, schema, quota and terms are verified. The environment-variable name is chosen only after that authenticated inspection. Missing credentials remain 424 and the source remains absent from default category membership until then.
 
 - [ ] **Step 1: Complete EPA developer signup/subscription in Chrome**
 

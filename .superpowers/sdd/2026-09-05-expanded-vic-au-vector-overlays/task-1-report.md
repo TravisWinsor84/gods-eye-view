@@ -49,3 +49,11 @@ explicitly instantiated `vic-epa-air`; both now use the runtime-eligible
 EPA developer-portal signup, product subscription, exact endpoint/schema,
 key-header, quota, licence and authenticated smoke validation remain required
 before a real EPA environment variable or adapter may be introduced.
+
+## Independent review fix round 1/5
+
+The independent review found no runtime defect and two documentation-contract
+defects. `DATA_SOURCES.md` now distinguishes implemented regional sources from
+gated catalogue-only candidates, and the registered EPA follow-on plan defers
+the environment-variable name until the authenticated provider contract is
+known. No runtime code changed in this fix round.

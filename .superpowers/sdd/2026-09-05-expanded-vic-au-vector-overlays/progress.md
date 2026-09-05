@@ -26,6 +26,8 @@
 
 - Task 1 brief generated; Regional Task 4 dependency is review-clean and the task is ready for dispatch.
 - Task 1 dispatched to implementer `Russell` (`01a06fdf-58e5-7a81-9246-d3f90f304991`) from base `b5859ef`.
+- Task 1 implementation committed as `06d6d5f`; affected layer tests 15/15, focused 43/43, full suite 2,775 passed with 1 skip, and build clean.
+- Task 1 independent review found zero runtime defects and two P2 documentation-contract defects: stale whole-catalogue inactive wording and a prematurely named EPA environment variable in the registered-operations follow-on plan. Fix round 1/5 corrects only those statements.
 - Task 1 TDD implementation is complete. The controller approved a bounded
   correction to the two stale `src/data/regionalLayer.test.mjs` fixtures; they
   now use `melbourne-trees` while preserving route, clustering, source-local
