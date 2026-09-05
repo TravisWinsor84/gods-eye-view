@@ -196,3 +196,10 @@ timestamps/ages, rate-limit headers, and a full normalized `/api/regional/ptv-tr
 smoke through the deployed server. The browser-safe configured marker and the
 server-only key must both be present in deployment configuration; no deployment
 or push is part of this fix round.
+
+## Final independent re-review
+
+Fix round 2 passed independent re-review with zero actionable findings. The
+reviewer reran the focused regional-layer suite (15 passed, 0 failed) and
+verified success-then-424 removal, repeated-denial behavior, source-local
+clearing, transient-error fallback preservation, and generation/destroy safety.
