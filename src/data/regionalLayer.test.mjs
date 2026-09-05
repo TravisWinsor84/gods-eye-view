@@ -6,6 +6,7 @@ import {
   REGIONAL_ENTITY_LIMIT,
   REGIONAL_LABEL_LIMIT,
   createRegionalLayer,
+  estimateViewportZoom,
 } from './regionalLayer.js';
 
 function pointFeature(id, longitude, latitude, title = id) {
@@ -81,6 +82,23 @@ function viewerStub({
   };
   return { viewer, added, removed, moveEnd };
 }
+
+test('Vicmap browser requests carry an independently estimated zoom level', async () => {
+  const rectangle = Cesium.Rectangle.fromDegrees(144.96, -37.82, 144.962, -37.818);
+  const { viewer } = viewerStub({ rectangle, height: 100 });
+  viewer.scene.canvas = { clientWidth: 1024 };
+  assert.ok(estimateViewportZoom(viewer, { west: 144.96, east: 144.962 }) >= 18);
+  const layer = createRegionalLayer({ id: 'regional-planning', sourceIds: ['vic-property-boundaries'] });
+  await layer.init(viewer);
+  await layer.enable(viewer);
+  let requested;
+  await withFetch(async (url) => {
+    requested = new URL(url, 'http://test');
+    return response([]);
+  }, () => layer.update(viewer));
+  assert.match(requested.pathname, /vic-property-boundaries$/);
+  assert.ok(Number(requested.searchParams.get('zoom')) >= 18);
+});
 
 async function withFetch(fetchImpl, operation) {
   const previous = globalThis.fetch;

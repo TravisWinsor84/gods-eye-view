@@ -67,13 +67,25 @@ function activeViewport(viewer) {
   return { west, south, east, north };
 }
 
-function proxyUrl(sourceId, bounds) {
+export function estimateViewportZoom(viewer, bounds) {
+  const span = Number(bounds?.east) - Number(bounds?.west);
+  const viewportWidth = Number(viewer?.scene?.canvas?.clientWidth)
+    || Number(viewer?.scene?.drawingBufferWidth)
+    || 1024;
+  if (!Number.isFinite(span) || span <= 0 || !Number.isFinite(viewportWidth) || viewportWidth <= 0) return 0;
+  return Math.max(0, Math.min(30, Math.floor(Math.log2((360 * viewportWidth) / (256 * span)))));
+}
+
+function proxyUrl(sourceId, bounds, viewer) {
   const params = new URLSearchParams({
     west: String(Number(bounds.west.toFixed(6))),
     south: String(Number(bounds.south.toFixed(6))),
     east: String(Number(bounds.east.toFixed(6))),
     north: String(Number(bounds.north.toFixed(6))),
   });
+  if (sourceId === 'vic-property-boundaries') {
+    params.set('zoom', String(estimateViewportZoom(viewer, bounds)));
+  }
   return `/api/regional/${sourceId}?${params}`;
 }
 
@@ -368,7 +380,7 @@ export function createRegionalLayer({
             return { sourceId, error };
           }
           try {
-            const response = await fetch(proxyUrl(sourceId, bounds), {
+            const response = await fetch(proxyUrl(sourceId, bounds, viewer), {
               method: 'GET',
               headers: { Accept: 'application/json' },
               signal: controller.signal,
