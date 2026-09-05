@@ -229,7 +229,9 @@ test('uses one clustered CustomDataSource and only the regional proxy route', as
   await layer.enable(viewer);
   await withFetch(async (url) => {
     urls.push(String(url));
-    return response([pointFeature('tree-1', 144.96, -37.81)]);
+    const feature = pointFeature('tree-1', 144.96, -37.81);
+    feature.properties.title = 'A long public place name with a full street address retained for inspection';
+    return response([feature]);
   }, () => layer.update(viewer));
 
   assert.equal(added.length, 1);
@@ -241,6 +243,9 @@ test('uses one clustered CustomDataSource and only the regional proxy route', as
   assert.equal(marker.point.pixelSize.getValue(at), 13);
   assert.equal(marker.label.disableDepthTestDistance.getValue(at), Number.POSITIVE_INFINITY);
   assert.equal(marker.label.showBackground.getValue(at), true);
+  assert.ok(marker.label.text.getValue(at).length <= 36);
+  assert.match(marker.label.text.getValue(at), /…$/);
+  assert.equal(marker.name, 'A long public place name with a full street address retained for inspection');
   assert.equal(urls.length, 1);
   assert.match(urls[0], /^\/api\/regional\/melbourne-trees\?/);
   assert.doesNotMatch(urls[0], /^https?:/);
