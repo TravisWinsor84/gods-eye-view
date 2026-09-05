@@ -37,6 +37,8 @@ import { initFirstRunExperience } from './firstRunExperience.js';
 import { initKeySetup } from './keySetup.js';
 import { loadPhotorealisticTileset } from './mapStartup.js';
 
+const regionalContextLayers = Object.freeze([...regionalDataLayers, ...regionalImageryLayers]);
+
 initLogoGaze();
 
 /**
@@ -190,7 +192,7 @@ async function init() {
     await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', { silent: true });
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
-    const styleManager = new StyleManager(viewer, { mapStackController, regionalLayers: regionalDataLayers });
+    const styleManager = new StyleManager(viewer, { mapStackController, regionalLayers: regionalContextLayers });
     // The previous multi-canvas weather compositor remains disabled. Cockpit
     // clouds use a separate, capped low-resolution GPU pass that never attaches
     // Cesium fog or post-process stages and is fully stopped in map mode.
