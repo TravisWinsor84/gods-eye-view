@@ -67,6 +67,12 @@ only after its authenticated contract has been validated.
 | `vic-parks` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:parkres` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Implemented daily viewport cache; reference reserve boundaries with name/type/manager only; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
 | `vic-recreation-tracks` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:recweb_tracks` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Line or multiline | Implemented daily viewport cache; reference alignment only, explicitly not live closure or condition state; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
 | `vic-heritage` | State of Victoria, [DataVic WFS](https://opendata.maps.vic.gov.au/geoserver/wfs), fixed `open-data-platform:heritage_register` layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Implemented daily viewport cache with unknown publisher cadence; bounded topology-checked simplification; last-good limited to seven days; not assigned to a visible category pack until Task 6 |
+| `vic-ev-chargers` | State of Victoria, [Government Funded Public EV Chargers](https://discover.data.vic.gov.au/dataset/government-funded-public-ev-chargers), fixed `open-data-platform:dcav_site` WFS layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Point | Implemented monthly-source reference through a daily viewport cache and seven-day last-good ceiling; funded sites only, not occupancy, pricing, service or live availability; no category-pack membership yet |
+| `vic-renewable-facilities` | State of Victoria, [Renewables Facility Location for Victoria](https://discover.data.vic.gov.au/dataset/renewables-facility-location-for-victoria), fixed `open-data-platform:renewables` WFS layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Adapter and proxy contract implemented for planning/infrastructure context only; not live generation or operation. The 2026-09-05 full-state live probe failed bounded topology validation and is not accepted as runtime-proven; no category-pack membership yet. |
+| `vic-flood-history-2022` | State of Victoria, [Victorian Flood History - October 2022 Event Public](https://discover.data.vic.gov.au/dataset/victorian-flood-history-october-2022-event-public), fixed `open-data-platform:vic_flood_history_public` WFS layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Historical and incomplete October 2022 evidence only, not current/peak extent, flash-flood coverage or warning. Adapter/proxy limits are implemented, but the 2026-09-05 live feature has 1,410 rings and fails the 512-ring cap before simplification; it is not runtime-proven and has no category-pack membership. |
+| `vic-epa-priority-sites` | EPA Victoria, [Priority Sites Register location polygons](https://discover.data.vic.gov.au/dataset/epa-victoria-priority-sites-register-psr-location-polygons), fixed `open-data-platform:psr_polygon` WFS layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Implemented daily viewport cache with seven-day last-good; register footprint only and absence does not mean uncontaminated or safe; no category-pack membership yet |
+| `vic-landfill-register` | EPA Victoria, [Victorian Landfill Register location polygons](https://discover.data.vic.gov.au/dataset/epa-victoria-victorian-landfill-register-vlr-location-polygons), fixed `open-data-platform:vlr_polygon` WFS layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Polygon or multipolygon | Implemented daily viewport cache with seven-day last-good; possible register lag and no current operating/safety inference; no category-pack membership yet |
+| `vic-recreation-assets` | State of Victoria, [DEECA Recreation Assets](https://discover.data.vic.gov.au/en_AU/dataset/recreation-assets), fixed `open-data-platform:recweb_asset` WFS layer | Creative Commons Attribution 4.0 International | `State of Victoria (DataVic)` | Point | Implemented daily viewport cache with seven-day last-good; inventory presence does not prove open or maintained; capped/partial at 1,000 of 3,173 statewide matches; no category-pack membership yet |
 | `melbourne-drinking-fountains` | City of Melbourne, [Drinking Fountains](https://data.melbourne.vic.gov.au/explore/dataset/drinking-fountains/information/) through Explore API v2.1 | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented six-hour viewport cache; publisher source cadence is daily; last-good is limited to three missed daily publisher cycles; inventory only and not assigned to a visible category pack until Task 6 |
 | `melbourne-barbecues` | City of Melbourne, [Public Barbecues](https://data.melbourne.vic.gov.au/explore/dataset/public-barbecues/information/) through Explore API v2.1 | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented six-hour viewport cache; publisher source cadence is daily; last-good is limited to three missed daily publisher cycles; inventory only and not assigned to a visible category pack until Task 6 |
 | `melbourne-parking-live` | City of Melbourne, [On-street Parking Bay Sensors](https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bay-sensors/information/) joined to [On-street Parking Bays](https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bays/information/) through Explore API v2.1 JSON exports | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented provider-wide two-minute cache; bbox filtering follows the server-side join; each observation becomes stale after five minutes; not assigned to a visible category pack until Task 6 |
@@ -98,7 +104,7 @@ sublayer failures are returned as degraded source status without exposing
 provider errors. These routes are implemented but are not visible in a category
 layer or pack until the explicit Task 6 integration.
 
-The four OGC routes use fixed WFS 2.0 `GetFeature` templates. Each request
+The ten OGC routes use fixed WFS 2.0 `GetFeature` templates. Each request
 includes an EPSG:4326 bbox and output CRS, GeoJSON output, both the WFS 2
 `count` ceiling and GeoServer's WFS 1-compatible `maxFeatures` ceiling, and a
 source-specific public `propertyName` allow-list. Redirects and non-JSON media
@@ -130,6 +136,22 @@ full polygon/multipolygon relationships are revalidated after simplification.
 A failed refresh uses source-local
 last-good data only inside the catalogue ceiling, otherwise returns a sanitized
 timeout/unavailable/invalid response.
+
+The six final-gap DataVic routes use only their documented public field
+allow-lists and derive stable public IDs from sanitized geometry and properties;
+provider IDs, addresses, comments, descriptions, notice/licence/reference IDs,
+raw coordinates and media/link identifiers are not emitted. EV charger sites,
+renewable facilities, EPA priority sites, landfill records and recreation
+assets are reference context with the source-specific caveats in the table.
+Flood history is always historical/incomplete October 2022 evidence. Its
+request count is one and its source-only limits are 1.5 MB per response, 60,000
+input coordinates per feature, 75,000 per response, 4,000 output coordinates
+per feature and 500,000 topology comparisons; every other OGC source retains
+the shared 2 MB, 50,000/100,000-coordinate and 150,000-comparison ceilings.
+The current live flood feature cannot satisfy the implemented ring/output
+combination without discarding topology, so the route currently fails closed
+rather than serving misleading geometry. See the Task 1 report for exact live
+evidence.
 
 The five Melbourne civic sources use fixed City of Melbourne Explore API v2.1
 requests and strict public-field allow-lists. Offset-paginated datasets use
