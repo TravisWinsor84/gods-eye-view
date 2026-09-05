@@ -97,7 +97,7 @@ export const REGIONAL_SOURCES = Object.freeze({
   'melbourne-cycling': Object.freeze({
     name: 'Melbourne Cycling Network', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
     endpoint: 'https://data.melbourne.vic.gov.au/api/explore/v2.1/', licence: 'CC BY (as declared by the selected dataset)',
-    geometry: 'line', refreshMs: 86_400_000, refresh: 'daily', credit: 'City of Melbourne Open Data', credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
+    geometry: 'line-or-polygon', refreshMs: 86_400_000, refresh: 'daily', credit: 'City of Melbourne Open Data', credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
   }),
   'melbourne-water-history': Object.freeze({
     name: 'Melbourne Water History', source: 'City of Melbourne Open Data', publisher: 'City of Melbourne',
@@ -508,12 +508,12 @@ function collectFeatures(rows, maxFeatures, normalizeRow) {
 function recordFeatures(sourceId, payload, maxFeatures) {
   if (!Array.isArray(payload?.results)) throw new Error(`${sourceId} payload must contain a results array`);
   return collectFeatures(payload.results, maxFeatures, (row) => {
-    const { record } = row || {};
-    const fields = record?.fields;
+    const record = row?.record || row;
+    const fields = record?.fields || record;
     const longitude = coordinate(fields?.longitude ?? fields?.lon, -180, 180);
     const latitude = coordinate(fields?.latitude ?? fields?.lat, -90, 90);
     if (longitude === null || latitude === null) return null;
-    return feature(record?.id ?? fields?.id, { type: 'Point', coordinates: [longitude, latitude] }, propertiesFor(fields,
+    return feature(record?.id ?? fields?.id ?? fields?.com_id, { type: 'Point', coordinates: [longitude, latitude] }, propertiesFor(fields,
       fields?.common_name || fields?.name || fields?.title || fields?.asset_name));
   });
 }
@@ -526,7 +526,7 @@ function geoJsonFeatures(source, payload, maxFeatures) {
     if (!geometry) return null;
     const properties = row?.properties || {};
     return feature(row?.id ?? properties.id ?? properties.objectid, geometry, propertiesFor(properties,
-      properties.title || properties.name || properties.road_name || properties.label || properties.feature_name));
+      properties.title || properties.name || properties.road_name || properties.label || properties.feature_name || properties.segmentdescription));
   });
 }
 
@@ -663,7 +663,7 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   }
   else if (['au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage', 'vic-ev-chargers',
     'vic-renewable-facilities', 'vic-flood-history-2022', 'vic-epa-priority-sites', 'vic-landfill-register',
-    'vic-recreation-assets'].includes(sourceId)) {
+    'vic-recreation-assets', 'vic-fire-context'].includes(sourceId)) {
     return normalizeOgcPayload(sourceId, payload, { maxFeatures: source.maxFeatures });
   }
   else if (['melbourne-drinking-fountains', 'melbourne-barbecues', 'melbourne-parking-live', 'melbourne-development', 'melbourne-culture'].includes(sourceId)) {

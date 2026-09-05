@@ -25,6 +25,7 @@ test('builds only fixed WFS requests with bbox, EPSG:4326, GeoJSON and count cap
     'vic-parks': ['https://opendata.maps.vic.gov.au/geoserver/wfs', 'open-data-platform:parkres'],
     'vic-recreation-tracks': ['https://opendata.maps.vic.gov.au/geoserver/wfs', 'open-data-platform:recweb_tracks'],
     'vic-heritage': ['https://opendata.maps.vic.gov.au/geoserver/wfs', 'open-data-platform:heritage_register'],
+    'vic-fire-context': ['https://opendata.maps.vic.gov.au/geoserver/wfs', 'open-data-platform:fire_history'],
   };
 
   for (const [sourceId, [base, typeName]] of Object.entries(expected)) {
@@ -98,6 +99,21 @@ test('uses safe regional fallback titles for untitled EPA and landfill polygons'
   const landfill = normalizeOgcFeature('vic-landfill-register', feature(POLYGON, { suburb: 'Frankston North', landfill_name: 'Not available' }));
   assert.equal(epa.properties.title, 'Pascoe Vale priority site register area');
   assert.equal(landfill.properties.title, 'Frankston North landfill register area');
+});
+
+test('normalizes DataVic fire history as historical context rather than a live incident', () => {
+  const result = normalizeOgcFeature('vic-fire-context', feature(POLYGON, {
+    name: 'METROPOLITAN 20', firetype: 'Bushfire', season: 2025,
+    start_date: '2024-12-16T00:00:00Z', area_ha: 0.95,
+    cause: 'Deliberate Lighting', globalid: 'private-provider-id',
+  }));
+  assert.equal(result.properties.title, 'METROPOLITAN 20');
+  assert.equal(result.properties.historical, true);
+  assert.equal(result.properties.fireType, 'Bushfire');
+  assert.equal(result.properties.season, 2025);
+  assert.equal(result.properties.areaHa, 0.95);
+  assert.match(result.properties.caveat, /historical.*not.*current/i);
+  assert.doesNotMatch(JSON.stringify(result), /private-provider-id|globalid/i);
 });
 
 test('preserves a bounded flood outlier exactly within its source-only cap and marks it partial', () => {

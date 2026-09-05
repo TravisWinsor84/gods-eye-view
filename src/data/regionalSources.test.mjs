@@ -333,6 +333,17 @@ test('constrains GeoJSON features to registered geometry and bounded public prop
   assert.equal('unsafe' in result.features[0].properties, false);
 });
 
+test('accepts the current City of Melbourne cycling polygon schema', () => {
+  const result = normalizeRegionalFeatureCollection('melbourne-cycling', {
+    type: 'FeatureCollection', features: [{ type: 'Feature', geometry: {
+      type: 'Polygon', coordinates: [[[144.95, -37.82], [144.96, -37.82], [144.96, -37.81], [144.95, -37.82]]],
+    }, properties: { objectid: 1, segmentdescription: 'Macaulay Road cycle lane', type: 'Cycle Lane' } }],
+  });
+  assert.equal(result.features.length, 1);
+  assert.equal(result.features[0].properties.title, 'Macaulay Road cycle lane');
+  assert.equal(result.features[0].properties.type, 'Cycle Lane');
+});
+
 test('rejects EPA payloads before reading them while the provider contract is unverified', () => {
   const unreadablePayload = {
     get data() {

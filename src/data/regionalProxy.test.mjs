@@ -23,9 +23,11 @@ function regionalResponseJson(value, status = 200) {
 
 function regionalTreePayload() {
   return {
-    results: [{ record: { id: 'tree-1', fields: {
-      common_name: 'River red gum', latitude: -37.81, longitude: 144.96,
-    } } }],
+    total_count: 1,
+    results: [{
+      com_id: 'tree-1', common_name: 'River red gum', latitude: -37.81, longitude: 144.96,
+      coordinatelocation: { lat: -37.81, lon: 144.96 },
+    }],
   };
 }
 
@@ -360,8 +362,27 @@ test('regional proxy builds a fixed official route from only the approved source
   }), `/api/regional/melbourne-trees${MELBOURNE_BOUNDS}`);
   assert.equal(safe.status, 200);
   assert.match(requestedUrl, /^https:\/\/data\.melbourne\.vic\.gov\.au\/api\/explore\/v2\.1\/catalog\/datasets\/trees-with-species-and-dimensions-urban-forest\/records\?/);
-  assert.match(requestedUrl, /limit=1000/);
+  assert.equal(new URL(requestedUrl).searchParams.get('limit'), '100');
+  assert.equal(
+    new URL(requestedUrl).searchParams.get('where'),
+    'in_bbox(coordinatelocation, -37.9, 144.9, -37.8, 145)',
+  );
   assert.doesNotMatch(requestedUrl, /attacker|secret/);
+});
+
+test('regional proxy uses the current official BOM Geofabric mapped-stream layer', async () => {
+  let request;
+  const response = await invokeRegional(createRegionalProxy({
+    fetchImpl: async (input) => {
+      request = new URL(input);
+      return regionalResponseJson({ type: 'FeatureCollection', features: [] });
+    },
+  }), `/api/regional/au-hydrology${MELBOURNE_BOUNDS}`);
+  assert.equal(response.status, 200);
+  assert.equal(request.origin, 'https://hosting.wsapi.cloud.bom.gov.au');
+  assert.equal(request.pathname, '/arcgis/rest/services/ahgf/Geofabric_V3x_All_Products/MapServer/24/query');
+  assert.equal(request.searchParams.get('outSR'), '4326');
+  assert.equal(request.searchParams.get('outFields'), 'name,hierarchy,perennial,srcftype');
 });
 
 test('regional proxy delegates Melbourne civic sources with only validated source, bounds and caps', async () => {
@@ -385,6 +406,36 @@ test('regional proxy delegates Melbourne civic sources with only validated sourc
     bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 },
     maxFeatures: 500,
   }]);
+});
+
+test('regional proxy activates bounded historical AIHW ED data through its dedicated client', async () => {
+  const calls = [];
+  const response = await invokeRegional(createRegionalProxy({
+    aihwHospitalEd: {
+      async load(options) {
+        calls.push(options);
+        return {
+          extract: { result: { data: [] }, version_information: { data_version: 1, date_uploaded: '2026-05-28' } },
+          reportingUnits: { result: [] },
+        };
+      },
+    },
+  }), `/api/regional/au-hospital-ed-performance${MELBOURNE_BOUNDS}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers['x-regional-status'], 'fresh');
+  assert.deepEqual(calls, [{ bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 }, maxFeatures: 1_000 }]);
+  assert.deepEqual(JSON.parse(response.body).features, []);
+});
+
+test('regional proxy delegates the official cached freight release', async () => {
+  const calls = [];
+  const response = await invokeRegional(createRegionalProxy({
+    transportVicFreight: {
+      async load(options) { calls.push(options); return { type: 'FeatureCollection', features: [] }; },
+    },
+  }), `/api/regional/vic-freight-network${MELBOURNE_BOUNDS}`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, [{ bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 }, maxFeatures: 1_000 }]);
 });
 
 test('regional proxy fetches fixed OGC GeoJSON and strips provider IDs and unsafe fields', async () => {
