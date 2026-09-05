@@ -166,45 +166,73 @@ test('regional proxy bounds distinct-bbox upstream refreshes and releases capaci
   }
 });
 
-test('regional proxy reports absent PTV server credentials without exposing them', async () => {
-  const developerId = process.env.PTV_DEVELOPER_ID;
-  const apiKey = process.env.PTV_API_KEY;
-  delete process.env.PTV_DEVELOPER_ID;
-  delete process.env.PTV_API_KEY;
+test('regional proxy reports missing and blank Transport Victoria credentials before fetch', async () => {
+  const apiKey = process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+  delete process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
   try {
     let fetchCalls = 0;
-    const response = await invokeRegional(createRegionalProxy({
+    const middleware = createRegionalProxy({
       fetchImpl: async () => { fetchCalls += 1; return regionalResponseJson({}); },
-    }), `/api/regional/ptv-transit${MELBOURNE_BOUNDS}`);
-    assert.equal(response.status, 424);
+    });
+    const missing = await invokeRegional(middleware, `/api/regional/ptv-transit${MELBOURNE_BOUNDS}`);
+    process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = '   ';
+    const blank = await invokeRegional(middleware, `/api/regional/ptv-transit${MELBOURNE_BOUNDS}`);
+    assert.equal(missing.status, 424);
+    assert.equal(blank.status, 424);
     assert.equal(fetchCalls, 0);
-    assert.doesNotMatch(response.body, /secret-value|PTV_API_KEY|PTV_DEVELOPER_ID/);
+    assert.deepEqual(JSON.parse(missing.body), { error: 'regional source credentials required' });
+    assert.equal(missing.headers['x-regional-status'], 'credentials-required');
+    assert.doesNotMatch(missing.body, /secret-value|TRANSPORT_VIC|KeyID/);
   } finally {
-    if (developerId === undefined) delete process.env.PTV_DEVELOPER_ID;
-    else process.env.PTV_DEVELOPER_ID = developerId;
-    if (apiKey === undefined) delete process.env.PTV_API_KEY;
-    else process.env.PTV_API_KEY = apiKey;
+    if (apiKey === undefined) delete process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+    else process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = apiKey;
   }
 });
 
-test('regional proxy never attempts unsigned PTV requests when credentials are present', async () => {
-  const developerId = process.env.PTV_DEVELOPER_ID;
-  const apiKey = process.env.PTV_API_KEY;
-  process.env.PTV_DEVELOPER_ID = 'developer-id';
-  process.env.PTV_API_KEY = 'secret-value';
+test('regional proxy passes only server key and validated bbox to the Transport Victoria client', async () => {
+  const apiKey = process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+  process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = ' secret-value ';
   try {
-    let fetchCalls = 0;
+    const calls = [];
     const response = await invokeRegional(createRegionalProxy({
-      fetchImpl: async () => { fetchCalls += 1; return regionalResponseJson({}); },
+      transportVicGtfs: {
+        async load(options) {
+          calls.push(options);
+          return {
+            vehicles: [{ entityId: 'e1', mode: 'metro', vehicleId: 'v1', position: { longitude: 144.96, latitude: -37.81 }, feedTimestamp: 1_800_000_000, feedAgeSeconds: 10, stale: false }],
+            modeStatus: { metro: { status: 'current', feedTimestamp: 1_800_000_000, feedAgeSeconds: 10 } },
+          };
+        },
+      },
     }), `/api/regional/ptv-transit${MELBOURNE_BOUNDS}`);
-    assert.equal(response.status, 501);
-    assert.equal(fetchCalls, 0);
-    assert.doesNotMatch(response.body, /developer-id|secret-value/);
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, [{
+      apiKey: 'secret-value',
+      bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 },
+      maxFeatures: 1_000,
+    }]);
+    assert.doesNotMatch(response.body, /secret-value|KeyID|TRANSPORT_VIC/);
   } finally {
-    if (developerId === undefined) delete process.env.PTV_DEVELOPER_ID;
-    else process.env.PTV_DEVELOPER_ID = developerId;
-    if (apiKey === undefined) delete process.env.PTV_API_KEY;
-    else process.env.PTV_API_KEY = apiKey;
+    if (apiKey === undefined) delete process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+    else process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = apiKey;
+  }
+});
+
+test('regional proxy maps Transport Victoria 401/403 and all-mode failure to sanitized responses', async () => {
+  const apiKey = process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+  process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = 'secret-value';
+  try {
+    for (const [code, expectedStatus] of [['CREDENTIALS_REQUIRED', 424], ['ALL_MODES_FAILED', 502]]) {
+      const response = await invokeRegional(createRegionalProxy({
+        transportVicGtfs: { async load() { const error = new Error('upstream secret-value internals'); error.code = code; throw error; } },
+      }), `/api/regional/ptv-transit${MELBOURNE_BOUNDS}`);
+      assert.equal(response.status, expectedStatus);
+      assert.doesNotMatch(response.body, /upstream|secret-value|internals|KeyID/);
+      if (expectedStatus === 424) assert.equal(response.headers['x-regional-status'], 'credentials-required');
+    }
+  } finally {
+    if (apiKey === undefined) delete process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY;
+    else process.env.TRANSPORT_VIC_OPEN_DATA_API_KEY = apiKey;
   }
 });
 

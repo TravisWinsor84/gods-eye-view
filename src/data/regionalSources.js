@@ -123,9 +123,12 @@ export const REGIONAL_SOURCES = Object.freeze({
     geometry: 'line-or-polygon', refreshMs: 604_800_000, refresh: 'weekly viewport query', credit: 'Bureau of Meteorology / Geoscience Australia', credential: 'none', runtimeEligible: true, maxFeatures: 1_000,
   }),
   'ptv-transit': Object.freeze({
-    name: 'PTV Transit', source: 'PTV Timetable API', publisher: 'Public Transport Victoria',
-    endpoint: 'https://timetableapi.ptv.vic.gov.au/swagger/ui/index', licence: 'Creative Commons Attribution 4.0 International',
-    geometry: 'point', refreshMs: 60_000, refresh: 'one minute when server credentials are configured', credit: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.', credential: 'server-required', runtimeEligible: true, maxFeatures: 1_000,
+    name: 'Transport Victoria Realtime Transit', source: 'Transport Victoria Open Data Portal', publisher: 'Public Transport Victoria',
+    endpoint: 'https://opendata.transport.vic.gov.au/dataset/gtfs-realtime', licence: 'Creative Commons Attribution 4.0 International',
+    geometry: 'point', refreshMs: 30_000, refresh: 'provider snapshots cached globally by mode for at least 30 seconds', credit: 'Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.',
+    // Browser layers require no credential. The proxy enforces this server-only
+    // provider credential and returns an honest 424 when it is absent.
+    credential: 'none', serverCredential: 'TRANSPORT_VIC_OPEN_DATA_API_KEY', runtimeEligible: true, maxFeatures: 1_000,
   }),
   'au-hospital-ed-performance': Object.freeze({
     name: 'Australian historical ED performance', source: 'AIHW MyHospitals',
@@ -264,15 +267,45 @@ function epaFeatures(payload, maxFeatures) {
 }
 
 function ptvFeatures(payload, maxFeatures) {
-  if (!Array.isArray(payload?.stops)) throw new Error('ptv-transit payload must contain a stops array');
-  return collectFeatures(payload.stops, maxFeatures, (stop) => {
-    const longitude = coordinate(stop?.stop_longitude ?? stop?.longitude, -180, 180);
-    const latitude = coordinate(stop?.stop_latitude ?? stop?.latitude, -90, 90);
+  if (!Array.isArray(payload?.vehicles)) throw new Error('ptv-transit payload must contain a vehicles array');
+  const validModes = new Set(['metro', 'tram', 'bus', 'vline']);
+  const validOccupancy = new Set(['EMPTY', 'MANY_SEATS_AVAILABLE', 'FEW_SEATS_AVAILABLE', 'STANDING_ROOM_ONLY', 'CRUSHED_STANDING_ROOM_ONLY', 'FULL', 'NOT_ACCEPTING_PASSENGERS', 'NO_DATA_AVAILABLE', 'NOT_BOARDABLE']);
+  return collectFeatures(payload.vehicles, maxFeatures, (vehicle) => {
+    const longitude = coordinate(vehicle?.position?.longitude, -180, 180);
+    const latitude = coordinate(vehicle?.position?.latitude, -90, 90);
     if (longitude === null || latitude === null) return null;
-    return feature(stop?.stop_id ?? stop?.id, { type: 'Point', coordinates: [longitude, latitude] }, propertiesFor({
-      category: stop?.route_type, type: stop?.stop_type,
-    }, stop?.stop_name || stop?.name || 'PTV stop'));
+    const mode = cleanText(vehicle?.mode, 20);
+    if (!validModes.has(mode)) return null;
+    const properties = {
+      title: `${mode === 'vline' ? 'V/Line' : `${mode[0].toUpperCase()}${mode.slice(1)}`} vehicle`,
+      mode,
+      stale: vehicle?.stale === true,
+    };
+    for (const key of ['vehicleId', 'tripId', 'routeId']) {
+      const value = cleanText(vehicle?.[key], 160).replace(/[<>\u0000-\u001f\u007f]/g, '');
+      if (value) properties[key] = value;
+    }
+    for (const key of ['timestamp', 'feedTimestamp', 'feedAgeSeconds']) {
+      if (Number.isSafeInteger(vehicle?.[key]) && vehicle[key] >= 0) properties[key] = vehicle[key];
+    }
+    if (typeof vehicle?.bearing === 'number' && Number.isFinite(vehicle.bearing) && vehicle.bearing >= 0 && vehicle.bearing < 360) {
+      properties.bearing = vehicle.bearing;
+    }
+    if (validOccupancy.has(vehicle?.occupancyStatus)) properties.occupancyStatus = vehicle.occupancyStatus;
+    return feature(vehicle?.entityId || vehicle?.vehicleId, { type: 'Point', coordinates: [longitude, latitude] }, properties);
   });
+}
+
+function ptvModeStatus(payload) {
+  const statuses = {};
+  for (const mode of ['metro', 'tram', 'bus', 'vline']) {
+    const input = payload?.modeStatus?.[mode];
+    if (!['current', 'stale', 'unavailable'].includes(input?.status)) continue;
+    statuses[mode] = { status: input.status };
+    if (Number.isSafeInteger(input.feedTimestamp) && input.feedTimestamp > 0) statuses[mode].feedTimestamp = input.feedTimestamp;
+    if (Number.isSafeInteger(input.feedAgeSeconds) && input.feedAgeSeconds >= 0) statuses[mode].feedAgeSeconds = input.feedAgeSeconds;
+  }
+  return statuses;
 }
 
 function aihwCaveats(row) {
@@ -363,7 +396,11 @@ export function normalizeRegionalFeatureCollection(sourceId, payload) {
   else if (sourceId === 'ptv-transit') features = ptvFeatures(payload, source.maxFeatures);
   else if (sourceId === 'au-hospital-ed-performance') features = aihwFeatures(source, payload);
   else features = geoJsonFeatures(source, payload, source.maxFeatures);
-  return { type: 'FeatureCollection', features };
+  return {
+    type: 'FeatureCollection',
+    features,
+    ...(sourceId === 'ptv-transit' ? { modeStatus: ptvModeStatus(payload) } : {}),
+  };
 }
 
 /** Return the source's required display attribution, or reject an unknown source. */

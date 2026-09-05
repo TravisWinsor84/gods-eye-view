@@ -20,6 +20,7 @@ export const REGIONAL_PACKS = Object.freeze({
       'vic-epa-air',
       'vic-fire-context',
       'vic-freight-network',
+      'ptv-transit',
     ]),
   }),
   'regional-australia': Object.freeze({

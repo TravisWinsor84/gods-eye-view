@@ -1,4 +1,5 @@
 import { REGIONAL_SOURCES, normalizeRegionalFeatureCollection } from './regionalSources.js';
+import { createTransportVicGtfs } from './transportVicGtfs.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -167,9 +168,10 @@ function unavailableError(error) {
 }
 
 /** Create Vite middleware for the fixed, public regional-source allow-list. */
-export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs } = {}) {
+export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs } = {}) {
   const cache = new Map();
   const inFlight = new Map();
+  const transportClient = transportVicGtfs || createTransportVicGtfs({ fetchImpl, now, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
   let activeRefreshes = 0;
 
   async function refresh(sourceId, source, bbox) {
@@ -202,13 +204,27 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     if (!source.runtimeEligible) return sendJson(res, 403, { error: 'regional source is unavailable' });
     const bbox = parseBounds(url);
     if (!bbox) return sendJson(res, 400, { error: 'invalid regional bounds' });
-    if (source.credential === 'server-required' && (!String(process.env.PTV_DEVELOPER_ID || '').trim() || !String(process.env.PTV_API_KEY || '').trim())) {
+    const serverApiKey = source.serverCredential
+      ? String(process.env[source.serverCredential] || '').trim()
+      : '';
+    if (source.serverCredential && !serverApiKey) {
       return sendJson(res, 424, { error: 'regional source credentials required' }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'credentials-required' });
     }
-    // Task 2 intentionally does not implement PTV's required HMAC signing.
-    // Refuse even configured credentials rather than send an unsigned request.
     if (sourceId === 'ptv-transit') {
-      return sendJson(res, 501, { error: 'regional source signing is not configured' }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'signing-required' });
+      try {
+        const payload = await transportClient.load({ bbox, apiKey: serverApiKey, maxFeatures: source.maxFeatures });
+        const body = normalizeRegionalFeatureCollection(sourceId, payload);
+        const statuses = Object.values(body.modeStatus || {}).map(({ status }) => status);
+        const status = statuses.every((value) => value === 'current') ? 'fresh' : 'degraded';
+        return sendJson(res, 200, body, { 'X-Regional-Source': sourceId, 'X-Regional-Status': status });
+      } catch (error) {
+        if (error?.code === 'CREDENTIALS_REQUIRED') {
+          return sendJson(res, 424, { error: 'regional source credentials required' }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'credentials-required' });
+        }
+        return sendJson(res, error?.code === 'TIMEOUT' ? 504 : 502, {
+          error: error?.code === 'TIMEOUT' ? 'regional source timed out' : 'regional source is temporarily unavailable',
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
+      }
     }
 
     const key = cacheKey(sourceId, bbox);

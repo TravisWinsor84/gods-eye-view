@@ -33,16 +33,21 @@ test('Melbourne pack contains exactly the four approved no-account sources', () 
   ]);
 });
 
-test('Task 3 packs contain only runtime no-account sources and exclude optional PTV', () => {
+test('regional packs contain runtime sources and the Victoria deployment includes Transport Victoria', () => {
   for (const packId of EXPECTED_PACK_IDS) {
     const sourceIds = regionalPackIds(packId);
     assert.ok(sourceIds.length > 0, `${packId} must not be empty`);
-    assert.equal(sourceIds.includes('ptv-transit'), false);
     for (const sourceId of sourceIds) {
       assert.equal(REGIONAL_SOURCES[sourceId].runtimeEligible, true, sourceId);
-      assert.equal(REGIONAL_SOURCES[sourceId].credential, 'none', sourceId);
     }
   }
+  assert.deepEqual(regionalPackIds('regional-victoria'), [
+    'vic-epa-air',
+    'vic-fire-context',
+    'vic-freight-network',
+    'ptv-transit',
+  ]);
+  assert.equal(REGIONAL_SOURCES['ptv-transit'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');
 });
 
 test('all regional pack IDs survive the v2 share-state round trip and remain off by default', () => {

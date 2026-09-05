@@ -25,7 +25,8 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.equal(Object.isFrozen(REGIONAL_SOURCES['melbourne-trees']), true);
   assert.equal(REGIONAL_SOURCES['melbourne-trees'].geometry, 'point');
   assert.equal(REGIONAL_SOURCES['vic-epa-air'].refreshMs, 300_000);
-  assert.equal(REGIONAL_SOURCES['ptv-transit'].credential, 'server-required');
+  assert.equal(REGIONAL_SOURCES['ptv-transit'].serverCredential, 'TRANSPORT_VIC_OPEN_DATA_API_KEY');
+  assert.match(REGIONAL_SOURCES['ptv-transit'].endpoint, /opendata\.transport\.vic\.gov\.au\/dataset\/gtfs-realtime/);
   assert.equal(REGIONAL_SOURCES['vic-cfa-alerts'].runtimeEligible, false);
   assert.ok(Number.isInteger(REGIONAL_SOURCES['melbourne-trees'].maxFeatures));
 });
@@ -235,7 +236,7 @@ test('rejects the restricted CFA/VicEmergency RSS source before parsing its payl
   );
 });
 
-test('normalizes fire context, freight, hydrology, and PTV payload shapes independently', () => {
+test('normalizes fire context, freight, hydrology, and Transport Victoria vehicle payloads independently', () => {
   const fire = normalizeRegionalFeatureCollection('vic-fire-context', {
     type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Bushfire Prone Area' }, geometry: {
       type: 'Polygon', coordinates: [[[144.9, -37.9], [145, -37.9], [145, -37.8], [144.9, -37.9]]],
@@ -252,17 +253,23 @@ test('normalizes fire context, freight, hydrology, and PTV payload shapes indepe
     } }],
   });
   const transit = normalizeRegionalFeatureCollection('ptv-transit', {
-    stops: [
-      { stop_id: 123, stop_name: 'Flinders Street Station', stop_latitude: -37.8183, stop_longitude: 144.9671, route_type: 0 },
-      { stop_id: 124, stop_name: 'Blank coordinate', stop_latitude: '', stop_longitude: 144.9 },
-      { stop_id: 125, stop_name: 'Boolean coordinate', stop_latitude: -37.8, stop_longitude: true },
+    vehicles: [
+      { entityId: 'entity-1', mode: 'metro', vehicleId: 'vehicle-1', tripId: 'trip-1', routeId: 'route-1', position: { latitude: -37.8183, longitude: 144.9671 }, timestamp: 1_800_000_000, feedTimestamp: 1_799_999_990, feedAgeSeconds: 10, stale: false, bearing: 90, occupancyStatus: 'MANY_SEATS_AVAILABLE' },
+      { entityId: 'bad-range', mode: 'tram', position: { latitude: -91, longitude: 144.9 } },
+      { entityId: 'bad-nan', mode: 'bus', position: { latitude: -37.8, longitude: Number.NaN } },
     ],
+    modeStatus: { metro: { status: 'current', feedTimestamp: 1_799_999_990, feedAgeSeconds: 10 } },
   });
   assert.equal(fire.features[0].properties.title, 'Bushfire Prone Area');
   assert.equal(freight.features[0].properties.title, 'Western Freeway');
   assert.equal(hydrology.features[0].properties.title, 'Merri Creek');
   assert.deepEqual(transit.features[0].geometry.coordinates, [144.9671, -37.8183]);
-  assert.equal(transit.features[0].properties.title, 'Flinders Street Station');
+  assert.equal(transit.features[0].properties.title, 'Metro vehicle');
+  assert.equal(transit.features[0].properties.vehicleId, 'vehicle-1');
+  assert.equal(transit.features[0].properties.tripId, 'trip-1');
+  assert.equal(transit.features[0].properties.routeId, 'route-1');
+  assert.equal(transit.features[0].properties.stale, false);
+  assert.deepEqual(transit.modeStatus, { metro: { status: 'current', feedTimestamp: 1_799_999_990, feedAgeSeconds: 10 } });
 });
 
 test('unknown and inherited source IDs fail closed everywhere', () => {

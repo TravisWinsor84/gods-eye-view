@@ -57,7 +57,7 @@ none is documented here.
 | `vic-fire-context` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Polygon or line | Daily viewport query |
 | `vic-freight-network` | State of Victoria, [DataVic](https://discover.data.vic.gov.au/) | Creative Commons Attribution 4.0 International, subject to the selected dataset's listing | `State of Victoria (DataVic)` | Line or point | Daily viewport query |
 | `au-hydrology` | Bureau of Meteorology / Geoscience Australia, [Australian Hydrological Geospatial Fabric](https://www.bom.gov.au/water/geofabric/) | Creative Commons Attribution 4.0 International, subject to the selected service/dataset listing | `Bureau of Meteorology / Geoscience Australia` | Line or polygon | Weekly viewport query |
-| `ptv-transit` | Public Transport Victoria, [PTV Timetable API v3](https://timetableapi.ptv.vic.gov.au/swagger/ui/index) | Creative Commons Attribution 4.0 International; a PTV developer ID, request signature, and API key are required server-side | `Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.` | Point (stops) | One minute only when the server-side PTV credentials are configured |
+| `ptv-transit` | Public Transport Victoria, [Transport Victoria Open Data Portal GTFS Realtime](https://opendata.transport.vic.gov.au/dataset/gtfs-realtime) | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/); one Open Data Portal key is required server-side | `Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.` | Point (vehicle positions) | Metro, tram, bus and V/Line provider snapshots cached globally by mode for at least 30 seconds; bbox filtering occurs after decode |
 | `au-hospital-ed-performance` | Australian Institute of Health and Welfare, [MyHospitals API](https://www.aihw.gov.au/hospitals/other-resources/myhospitals-api) | [CC BY 4.0](https://www.aihw.gov.au/copyright); no credentials | `Based on Australian Institute of Health and Welfare material.` | Point (hospital reporting units) | 24-hour application cache; release-cycle historical data |
 
 `au-hospital-ed-performance` is approved only for aggregate, period-based
@@ -66,6 +66,19 @@ demand, capacity, ambulance-offload, medical-routing or treatment-forecast
 source. Every normalized datum keeps its official link, reporting period, API
 freshness metadata, caveats and error state. Suppressed values are marked but
 never emitted as numbers. This registration does not add a proxy, layer or UI.
+
+`ptv-transit` uses only the four current vehicle-position feeds beneath
+`https://api.opendata.transport.vic.gov.au/opendata/public-transport/gtfs/realtime/v1`:
+metro, tram, bus and V/Line. The server sends
+`TRANSPORT_VIC_OPEN_DATA_API_KEY` only in the upstream `KeyID` header with
+`Accept: application/x-protobuf`; browser requests remain fixed to
+`/api/regional/ptv-transit` with validated bounds. Responses retain only safe
+vehicle, trip and route identifiers plus timestamp, bearing and occupancy when
+valid. Publisher-facing labels, licence plates and other internal identifiers
+are not exposed. Each response reports per-mode current, stale or unavailable
+status and feed age; over-age positions are discarded. Trip updates,
+departures and static GTFS joins are not implemented. The legacy PTV v3
+credential contract is not used.
 
 ### Australian civic candidates that are not executable
 
