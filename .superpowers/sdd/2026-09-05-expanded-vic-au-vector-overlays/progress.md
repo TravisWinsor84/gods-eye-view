@@ -97,3 +97,9 @@
   Node-version allocation-benchmark skip; production build passed at 161
   modules; `git diff --check` passed. Independent re-review remains pending;
   no push or deployment occurred.
+- Task 2 final independent re-review passed with zero actionable findings and
+  reran the focused suite 83/83. Task 2 complete at `eff5aea`.
+- Task 3 preflight: all seven official Opendatasoft dataset IDs resolve. Live
+  counts include 6,324 parking sensors and 29,053 bays; arbitrary rows may be
+  old while the maximum observation timestamp is current, so freshness is
+  per-record and provider tables must be globally cached/indexed.

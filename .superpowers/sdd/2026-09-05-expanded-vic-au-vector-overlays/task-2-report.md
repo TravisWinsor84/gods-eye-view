@@ -134,8 +134,9 @@ git diff --check
 passed
 ```
 
-Independent re-review remains pending. Browser-visible category-layer proof is
-still Task 6, and nothing has been pushed or deployed.
+Final independent re-review passed with zero actionable findings and reran the
+focused suite 83/83. Browser-visible category-layer proof is still Task 6, and
+nothing has been pushed or deployed.
 
 ## Independent-review fix round 2
 
