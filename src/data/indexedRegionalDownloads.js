@@ -7,7 +7,6 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const BUCKET_DEGREES = 1;
 const MAX_PUBLIC_TEXT = 180;
 
-const TOILET_TERMS_CONFLICT = 'Structured catalogue licence says CC BY 3.0 AU, while package notes require prompt updates and describe the licence as non-transferable with no sublicensing; legal review is required before relying on redistribution rights.';
 const TOILET_CAVEAT = 'Reference inventory only; accuracy, completeness and current availability are not guaranteed.';
 const OPENING_HOURS_CAVEAT = 'Descriptive source text only; not proof this facility is currently open.';
 const TRANSIT_CAVEAT = 'Reference stop inventory only; not realtime and not evidence that a service is currently running.';
@@ -18,6 +17,7 @@ const SOURCE_CONFIGS = Object.freeze({
     packageId: '553b3049-2b8b-46a2-95e6-640d7986a8c1',
     metadataHost: 'data.gov.au',
     downloadHosts: new Set(['data.gov.au']),
+    downloadPathPrefix: '/data/dataset/',
     resourceName: 'Toiletmap.csv',
     format: 'CSV',
     mediaType: 'text/csv',
@@ -36,6 +36,7 @@ const SOURCE_CONFIGS = Object.freeze({
     packageId: '6d36dfd9-8693-4552-8a03-05eb29a391fd',
     metadataHost: 'opendata.transport.vic.gov.au',
     downloadHosts: new Set(['opendata.transport.vic.gov.au']),
+    downloadPathPrefix: '/dataset/',
     resourceName: 'Public Transport Stops',
     format: 'GeoJSON',
     mediaType: 'application/geo+json',
@@ -97,8 +98,16 @@ function headerValue(response, name, maxLength = 1_024) {
 }
 
 async function readStreamCapped(response, { maxBytes, maxCompressedBytes }) {
-  const declaredLength = Number(response.headers?.get?.('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > maxCompressedBytes) {
+  const declaredHeader = response.headers?.get?.('content-length');
+  const declaredLength = typeof declaredHeader === 'string' && declaredHeader.trim()
+    ? Number(declaredHeader)
+    : null;
+  if (declaredLength !== null && (!Number.isFinite(declaredLength) || declaredLength < 0)) {
+    await cancelResponseBody(response);
+    throw codedError('invalid source data', 'INVALID_SOURCE_DATA');
+  }
+  if (declaredLength !== null && declaredLength > maxCompressedBytes) {
+    await cancelResponseBody(response);
     throw codedError('source limit exceeded', 'SOURCE_LIMIT');
   }
   const reader = response.body?.getReader?.();
@@ -114,6 +123,9 @@ async function readStreamCapped(response, { maxBytes, maxCompressedBytes }) {
       if (decodedBytes > maxBytes) throw codedError('source limit exceeded', 'SOURCE_LIMIT');
       chunks.push(value);
     }
+  } catch (error) {
+    try { await reader.cancel(); } catch { /* already aborted or errored */ }
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -126,8 +138,12 @@ async function readStreamCapped(response, { maxBytes, maxCompressedBytes }) {
   return {
     bytes,
     decodedBytes,
-    compressedBytes: Number.isFinite(declaredLength) && declaredLength >= 0 ? declaredLength : null,
+    compressedBytes: declaredLength,
   };
+}
+
+async function cancelResponseBody(response) {
+  try { await response?.body?.cancel?.(); } catch { /* best-effort connection teardown */ }
 }
 
 function stableValue(value) {
@@ -332,15 +348,25 @@ function validateResource(config, metadata) {
   }
   let url;
   try { url = new URL(resource.url); } catch { throw codedError('invalid source metadata', 'INVALID_SOURCE_METADATA'); }
+  const expectedPrefix = `${config.downloadPathPrefix}${config.packageId}/resource/${resource.id}/download/`;
+  const downloadName = url.pathname.startsWith(expectedPrefix) ? url.pathname.slice(expectedPrefix.length) : '';
   if (url.protocol !== 'https:' || url.username || url.password || url.port
-    || !config.downloadHosts.has(url.hostname)
-    || !url.pathname.includes(`/dataset/${config.packageId}/resource/${resource.id}/download/`)) {
+    || !config.downloadHosts.has(url.hostname) || url.search || url.hash
+    || !downloadName || downloadName.includes('/')) {
     throw codedError('invalid source metadata', 'INVALID_SOURCE_METADATA');
   }
   const declaredSize = Number(resource.size);
   if (!Number.isFinite(declaredSize) || declaredSize < 0 || declaredSize > config.maxCompressedBytes) {
     throw codedError('source limit exceeded', 'SOURCE_LIMIT');
   }
+  const licence = cleanText(metadata.result.license_title, 160) || null;
+  const notes = typeof metadata.result.notes === 'string' ? metadata.result.notes : '';
+  const hasUpdateTerm = /\bupdat(?:e|es|ed|ing)\b|update your copy/i.test(notes);
+  const hasNonTransferTerm = /non-transferable/i.test(notes);
+  const hasNoSublicenceTerm = /may not (?:be )?sublicen[cs](?:e|ed)|no sublicen[cs]ing/i.test(notes);
+  const termsConflict = hasUpdateTerm && hasNonTransferTerm && hasNoSublicenceTerm
+    ? `Structured catalogue licence says ${licence || 'unspecified'}, while package notes require prompt updates and describe the licence as non-transferable with no sublicensing; legal review is required before relying on redistribution rights.`
+    : `Structured catalogue licence says ${licence || 'unspecified'}, while package notes contain separate provider terms; legal review is required before relying on redistribution rights.`;
   return Object.freeze({
     id: resource.id,
     url: url.href,
@@ -350,10 +376,10 @@ function validateResource(config, metadata) {
     metadataModified: cleanText(metadata.result.metadata_modified, 80) || null,
     resourceModified: cleanText(resource.last_modified, 80) || null,
     datasetLastUpdatedDate: cleanText(resource.dataset_last_updated_date, 80) || null,
-    licence: cleanText(metadata.result.license_title, 160) || null,
+    licence,
     ...(config === SOURCE_CONFIGS['au-public-toilets'] ? {
       legalReview: 'required',
-      termsConflict: TOILET_TERMS_CONFLICT,
+      termsConflict,
     } : {}),
   });
 }
@@ -417,13 +443,26 @@ export function createIndexedRegionalDownload({
         try {
           response = await fetchImpl(input, { method: 'GET', headers, signal: controller.signal, redirect: 'error' });
         } catch (error) {
-          if (error?.name === 'AbortError') throw codedError('source timed out', 'TIMEOUT');
+          if (error?.name === 'AbortError' || controller.signal.aborted) throw codedError('source timed out', 'TIMEOUT');
           throw codedError('source temporarily unavailable', 'UPSTREAM_UNAVAILABLE');
         }
         if (allowNotModified && response?.status === 304) return { notModified: true, response };
-        if (!response?.ok) throw codedError('source temporarily unavailable', 'UPSTREAM_UNAVAILABLE');
-        if (!acceptedTypes.has(mediaType(response))) throw codedError('invalid source data', 'INVALID_SOURCE_DATA');
-        return { response, ...await readStreamCapped(response, { maxBytes: byteLimit, maxCompressedBytes: compressedLimit }) };
+        if (!response?.ok) {
+          await cancelResponseBody(response);
+          throw codedError('source temporarily unavailable', 'UPSTREAM_UNAVAILABLE');
+        }
+        if (!acceptedTypes.has(mediaType(response))) {
+          await cancelResponseBody(response);
+          throw codedError('invalid source data', 'INVALID_SOURCE_DATA');
+        }
+        try {
+          return { response, ...await readStreamCapped(response, { maxBytes: byteLimit, maxCompressedBytes: compressedLimit }) };
+        } catch (error) {
+          if (error?.name === 'AbortError' || controller.signal.aborted) {
+            throw codedError('source timed out', 'TIMEOUT');
+          }
+          throw error;
+        }
       } finally {
         clearTimeout(timer);
       }
@@ -449,8 +488,10 @@ export function createIndexedRegionalDownload({
 
   async function refresh() {
     const checkedAt = now();
+    const isFresh = (timestamp, ttl) => Number.isFinite(timestamp)
+      && checkedAt >= timestamp && checkedAt - timestamp < ttl;
     let resource = metadata?.resource || null;
-    if (!resource || checkedAt - metadataCheckedAt >= metadataMaxAgeMs) {
+    if (!resource || !isFresh(metadataCheckedAt, metadataMaxAgeMs)) {
       try {
         resource = await resolveResource({ requestJson });
       } catch (error) {
@@ -465,7 +506,7 @@ export function createIndexedRegionalDownload({
     }
 
     const resourceChanged = dataset && !sameResource(dataset.resource, resource);
-    if (dataset && !resourceChanged && checkedAt - dataset.validatedAt < maxAgeMs) {
+    if (dataset && !resourceChanged && isFresh(dataset.validatedAt, maxAgeMs)) {
       dataset.resource = resource;
       return { dataset, cache: 'hit', downloadStatus: dataset.downloadStatus };
     }
@@ -531,7 +572,8 @@ export function createIndexedRegionalDownload({
     if (!pending) pending = refresh().finally(() => { pending = null; });
     try { return await pending; }
     catch (error) {
-      if (dataset && now() - dataset.validatedAt <= maxStaleMs) {
+      const failedAt = now();
+      if (dataset && failedAt >= dataset.validatedAt && failedAt - dataset.validatedAt <= maxStaleMs) {
         return { dataset, cache: 'stale', downloadStatus: 'failed-revalidation', stale: true };
       }
       if (['SOURCE_LIMIT', 'INVALID_SOURCE_METADATA', 'INVALID_SOURCE_DATA', 'TIMEOUT'].includes(error?.code)) throw error;

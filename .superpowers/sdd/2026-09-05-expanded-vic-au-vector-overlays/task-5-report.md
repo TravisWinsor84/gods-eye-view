@@ -61,3 +61,21 @@ semaphore.
 
 No source files were committed, no credentials were required, and nothing was
 pushed or deployed.
+
+## Independent-review fixes
+
+The first independent review found six hardening gaps. RED regressions now
+cover and the implementation now enforces all six:
+
+- a backward wall-clock step forces revalidation and cannot extend a current or
+  stale window;
+- oversized, malformed-media and failed response bodies are cancelled before
+  the shared provider permit is released;
+- download paths are exact provider/package/resource boundaries and reject
+  extra prefixes, query strings and fragments;
+- the toilet legal warning interpolates the current structured licence and
+  only describes the specific package-note clauses when they are present;
+- aborts during body consumption preserve timeout classification; and
+- a missing Content-Length is exposed as unknown (`null`), not zero bytes.
+
+Focused post-fix verification passed 103/103 tests.

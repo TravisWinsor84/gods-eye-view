@@ -137,6 +137,30 @@ test('a successful 304 extends the finite last-good window', async () => {
   assert.equal(stale.sourceStatus.status, 'stale');
 });
 
+test('a backward wall-clock step forces revalidation and cannot extend last-good data', async () => {
+  let clock = 10_000;
+  let fetchCalls = 0;
+  const index = genericIndex({
+    now: () => clock,
+    maxAgeMs: 100,
+    metadataMaxAgeMs: 100,
+    maxStaleMs: 200,
+    resolveResource: async () => ({
+      id: '11111111-1111-4111-8111-111111111111', url: 'https://downloads.example.test/v1.bin',
+    }),
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      if (fetchCalls > 1) throw new Error('outage');
+      return streamedResponse('fixture');
+    },
+    parse: async () => ({ features: [point('Cached', 144.96, -37.81)], totalRows: 1, invalidRows: 0 }),
+  });
+  await index.query(MELBOURNE);
+  clock = 0;
+  await assert.rejects(() => index.query(MELBOURNE), /temporarily unavailable/i);
+  assert.equal(fetchCalls, 2);
+});
+
 test('rotating resource ID or URL invalidates old download validators', async () => {
   let clock = 1_000;
   let revision = 1;
@@ -241,6 +265,52 @@ test('rejects declared compressed size, decoded stream, and row expansion beyond
     });
     await assert.rejects(() => index.query(MELBOURNE), /source limit/i);
   });
+});
+
+test('rejected bodies are cancelled before their shared request slot is released', async () => {
+  let cancelled = 0;
+  let active = 0;
+  const index = genericIndex({
+    maxBytes: 4,
+    withRequestSlot: async (operation) => {
+      active += 1;
+      try { return await operation(); } finally { active -= 1; }
+    },
+    resolveResource: async () => ({ id: '11111111-1111-4111-8111-111111111111', url: 'https://downloads.example.test/v1.bin' }),
+    fetchImpl: async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('12345')); },
+      cancel() { cancelled += 1; assert.equal(active, 1); },
+    }), { headers: { 'Content-Type': 'application/octet-stream' } }),
+    parse: async () => ({ features: [], totalRows: 0, invalidRows: 0 }),
+  });
+  await assert.rejects(() => index.query(MELBOURNE), /source limit/i);
+  assert.equal(cancelled, 1);
+  assert.equal(active, 0);
+});
+
+test('body-phase aborts retain timeout classification', async () => {
+  const index = genericIndex({
+    timeoutMs: 5,
+    resolveResource: async () => ({ id: '11111111-1111-4111-8111-111111111111', url: 'https://downloads.example.test/v1.bin' }),
+    fetchImpl: async (_input, { signal }) => new Response(new ReadableStream({
+      start(controller) {
+        signal.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true });
+      },
+    }), { headers: { 'Content-Type': 'application/octet-stream' } }),
+    parse: async () => ({ features: [], totalRows: 0, invalidRows: 0 }),
+  });
+  await assert.rejects(() => index.query(MELBOURNE), (error) => error?.code === 'TIMEOUT');
+});
+
+test('missing Content-Length remains unknown rather than reporting zero compressed bytes', async () => {
+  const index = genericIndex({
+    resolveResource: async () => ({ id: '11111111-1111-4111-8111-111111111111', url: 'https://downloads.example.test/v1.bin' }),
+    fetchImpl: async () => streamedResponse('fixture'),
+    parse: async () => ({ features: [point('Chunked', 144.96, -37.81)], totalRows: 1, invalidRows: 0 }),
+  });
+  const result = await index.query(MELBOURNE);
+  assert.equal(result.sourceStatus.compressedBytes, null);
+  assert.equal(result.sourceStatus.decodedBytes, 7);
 });
 
 function ckanPayload(sourceId, overrides = {}) {
@@ -364,6 +434,9 @@ test('official resolver rejects non-HTTPS, wrong-host, malformed-ID, wrong-type 
     ['malformed ID', { id: 'not-a-uuid' }],
     ['wrong media type', { mimetype: 'text/html' }],
     ['declared oversize', { size: 99_000_000 }],
+    ['unapproved path prefix', { url: 'https://data.gov.au/unapproved-prefix/dataset/553b3049-2b8b-46a2-95e6-640d7986a8c1/resource/34076296-6692-4e30-b627-67b7c4eb1027/download/toilet.csv' }],
+    ['download query', { url: 'https://data.gov.au/data/dataset/553b3049-2b8b-46a2-95e6-640d7986a8c1/resource/34076296-6692-4e30-b627-67b7c4eb1027/download/toilet.csv?next=evil' }],
+    ['download fragment', { url: 'https://data.gov.au/data/dataset/553b3049-2b8b-46a2-95e6-640d7986a8c1/resource/34076296-6692-4e30-b627-67b7c4eb1027/download/toilet.csv#evil' }],
   ];
   for (const [name, override] of cases) {
     await t.test(name, async () => {
@@ -373,6 +446,16 @@ test('official resolver rejects non-HTTPS, wrong-host, malformed-ID, wrong-type 
       assert.equal(calls.filter(({ url }) => !url.includes('/api/3/action/package_show')).length, 0);
     });
   }
+});
+
+test('toilet legal warning reflects rotated licence metadata without a hard-coded contradiction', async () => {
+  const metadataOverride = ckanPayload('au-public-toilets');
+  metadataOverride.result.license_title = 'Other provider licence';
+  const { client } = officialDownloads({ metadataOverride });
+  const result = await client.load('au-public-toilets', { bbox: MELBOURNE, maxFeatures: 10 });
+  assert.equal(result.sourceStatus.licence, 'Other provider licence');
+  assert.match(result.sourceStatus.termsConflict, /Other provider licence/);
+  assert.doesNotMatch(result.sourceStatus.termsConflict, /catalogue licence says CC BY 3\.0 AU/i);
 });
 
 test('official resolver rejects metadata/download media mismatches and redirects without following them', async (t) => {

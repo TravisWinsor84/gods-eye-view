@@ -49,7 +49,7 @@ function ckanIndexedFixture(sourceId) {
         name: toilet ? 'Toiletmap.csv' : 'Public Transport Stops',
         format: toilet ? 'CSV' : 'GeoJSON',
         mimetype: toilet ? 'text/csv' : 'application/geo+json',
-        url: `https://${host}/dataset/${packageId}/resource/${resourceId}/download/${toilet ? 'toilet.csv' : 'public_transport_stops.geojson'}`,
+        url: `https://${host}/${toilet ? 'data/' : ''}dataset/${packageId}/resource/${resourceId}/download/${toilet ? 'toilet.csv' : 'public_transport_stops.geojson'}`,
         size: 1_000,
         last_modified: '2026-09-05T00:00:00',
         ...(toilet ? {} : { dataset_last_updated_date: '2025-07-28T00:00:00' }),

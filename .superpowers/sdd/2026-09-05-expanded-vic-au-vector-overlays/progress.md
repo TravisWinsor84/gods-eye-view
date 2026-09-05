@@ -280,3 +280,7 @@
   providers subsequently returned not-modified revalidation semantics. The
   toilet catalogue/package licence conflict remains explicit and requires
   legal review. No push or deployment occurred.
+- Task 5 independent review found clock-rollback freshness, rejected-stream
+  cancellation, exact-path, rotating-licence wording, body-timeout and unknown
+  compressed-size defects. RED regressions reproduced all six; the fixes pass
+  103/103 focused adapter/catalogue/proxy tests. No push or deployment occurred.
