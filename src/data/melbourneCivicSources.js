@@ -253,6 +253,17 @@ function parkingCell(coordinates) {
   return `${Math.floor(coordinates[0] / PARKING_INDEX_CELL_DEGREES)},${Math.floor(coordinates[1] / PARKING_INDEX_CELL_DEGREES)}`;
 }
 
+function compareParkingSensors(left, right) {
+  for (const field of ['status_timestamp', 'lastupdated']) {
+    const leftTimestamp = Date.parse(left?.[field]);
+    const rightTimestamp = Date.parse(right?.[field]);
+    const leftRank = Number.isFinite(leftTimestamp) ? leftTimestamp : -Infinity;
+    const rightRank = Number.isFinite(rightTimestamp) ? rightTimestamp : -Infinity;
+    if (leftRank !== rightRank) return leftRank > rightRank ? -1 : 1;
+  }
+  return canonicalValue(left).localeCompare(canonicalValue(right));
+}
+
 export function buildMelbourneParkingIndex(sensors, bays) {
   const baysByKerbside = new Map();
   for (const bayRow of bays) {
@@ -261,10 +272,19 @@ export function buildMelbourneParkingIndex(sensors, bays) {
     if (!baysByKerbside.has(key)) baysByKerbside.set(key, []);
     baysByKerbside.get(key).push(bayRow);
   }
+  const sensorsByKerbside = new Map();
+  for (const sensorRow of sensors) {
+    if (sensorRow?.kerbsideid === null || sensorRow?.kerbsideid === undefined) continue;
+    const key = String(sensorRow.kerbsideid);
+    const current = sensorsByKerbside.get(key);
+    // Duplicate sensor rows prefer the latest finite observation, then latest
+    // finite row update, then the ascending canonical row representation.
+    if (!current || compareParkingSensors(sensorRow, current) < 0) sensorsByKerbside.set(key, sensorRow);
+  }
   const cells = new Map();
   let joinedRows = 0;
   let omittedWithoutGeometry = 0;
-  for (const sensorRow of sensors) {
+  for (const sensorRow of sensorsByKerbside.values()) {
     const candidates = baysByKerbside.get(String(sensorRow?.kerbsideid)) || [];
     const sensorCoordinates = pointFrom(sensorRow?.location);
     const ranked = candidates.filter((candidate) => parkingCoordinates(candidate)).sort((left, right) => {
@@ -332,7 +352,8 @@ export function queryMelbourneParkingIndex(index, bbox, { nowMs = Date.now(), ma
     groups.get(entry.normalized.id).push(entry);
   }
   const features = [];
-  for (const [baseId, entries] of groups) {
+  const orderedGroups = [...groups.entries()].sort(([leftId], [rightId]) => leftId.localeCompare(rightId));
+  for (const [baseId, entries] of orderedGroups) {
     entries.sort((left, right) => left.identity.localeCompare(right.identity));
     for (let index = 0; index < entries.length && features.length < maxFeatures; index += 1) {
       entries[index].normalized.id = index === 0 ? baseId : `${baseId}-${index + 1}`;

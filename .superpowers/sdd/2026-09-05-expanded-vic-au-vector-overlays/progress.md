@@ -189,3 +189,14 @@
   civic suite passed 29/29. Final focused verification passed 118/118, full
   `npm test` passed 2,840 with 0 failures and 1 expected Node-version skip, and
   the production build passed at 162 modules; `git diff --check` passed.
+- Task 3 re-review 4 confirmed parking key privacy, duplicate-bay selection and
+  civic projection IDs, but found one P2: capped membership/order and
+  conflicting duplicate-sensor selection still depended on provider row order.
+- Task 3 fix round 5/5 adds RED-first reversal regressions over 1,005 parking
+  rows and three conflicting duplicate-sensor tie levels. Duplicate sensors now
+  choose latest finite observation time, then latest finite row update, then
+  ascending canonical row serialization. Public projection groups sort by base
+  ID and internal identity before the 1,000-feature cap is applied; no provider
+  key enters a public ID. Focused civic passed 31/31, required six-suite passed
+  120/120, full `npm test` passed 2,842 with 0 failures and 1 expected
+  Node-version skip, and the production build passed at 162 modules.

@@ -217,3 +217,30 @@ was performed. Independent re-review remains the next gate.
 
 No pack membership, push, deployment, account, credential or provider mutation
 was performed. Independent re-review remains the next gate.
+
+### Fresh verification after fix round 5
+
+- RED-first regressions reproduced both remaining order dependencies. Reversing
+  1,005 realistic sensor/bay rows changed the capped 1,000-feature membership
+  and ordering, while reversing conflicting duplicate sensors changed emitted
+  statuses and public IDs.
+- Duplicate sensor rows for one internal kerbside identity now select one
+  deterministic winner before bay matching: latest finite `status_timestamp`,
+  then latest finite `lastupdated`, then ascending canonical row serialization.
+- Parking projection groups are globally sorted by public base ID, then by
+  internal identity within an identical-projection group. `maxFeatures` is
+  applied only after that ordering. Internal kerbside identities remain absent
+  from public properties and public-ID digests.
+- Existing nearest-bay, stable ordinal-ID and 20,000-candidate parking privacy
+  regressions remained green.
+- Focused Melbourne civic suite: 31 passed, 0 failed. Final six-suite Task
+  3/shared proxy/GA/PTV command: 120 passed, 0 failed.
+- Full `npm test`: 2,842 passed, 0 failed, 1 expected skip. The skipped
+  allocation microbenchmarks remain calibrated for Node 24; verification ran
+  on Node 26.8.1.
+- `npm run build`: passed; Vite transformed 162 modules. The existing
+  large-chunk advisory was emitted.
+- `git diff --check`: passed.
+
+No pack membership, push, deployment, account, credential or provider mutation
+was performed. Independent re-review remains the next gate.

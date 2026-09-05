@@ -143,6 +143,69 @@ test('identical public parking records use stable ordinal IDs while repeated ker
   assert.doesNotMatch(JSON.stringify(forward), /kerbsideid/);
 });
 
+test('capped parking membership and order stay stable when provider tables reverse', () => {
+  const sensors = [];
+  const bays = [];
+  for (let index = 0; index < 1_005; index += 1) {
+    const kerbsideid = 20_000 + index;
+    const longitude = 144.91 + (index % 50) * 0.0015;
+    const latitude = -37.89 + Math.floor(index / 50) * 0.003;
+    sensors.push(sensor({
+      kerbsideid,
+      status_description: index % 2 === 0 ? 'Unoccupied' : 'Present',
+      status_timestamp: `2026-09-05T05:${String(index % 20).padStart(2, '0')}:00Z`,
+      location: { lon: longitude, lat: latitude },
+    }));
+    bays.push(bay({ kerbsideid, location: { lon: longitude, lat: latitude } }));
+  }
+  const run = (sensorRows, bayRows) => queryMelbourneParkingIndex(
+    buildMelbourneParkingIndex(sensorRows, bayRows), BBOX, { nowMs: NOW, maxFeatures: 1_000 },
+  );
+
+  const forward = run(sensors, bays);
+  const reverse = run([...sensors].reverse(), [...bays].reverse());
+  assert.equal(forward.features.length, 1_000);
+  assert.equal(forward.capped, true);
+  assert.deepEqual(
+    forward.features.map(({ id }) => id),
+    reverse.features.map(({ id }) => id),
+    'reversing provider rows cannot change capped membership or ordering',
+  );
+});
+
+test('conflicting duplicate sensors choose timestamp, update time, then canonical row order under reversal', () => {
+  const sharedObservation = '2026-09-05T05:20:00Z';
+  const sharedUpdate = '2026-09-05T05:21:00Z';
+  const sensors = [
+    sensor({ kerbsideid: 101, status_description: 'Unoccupied', status_timestamp: 'invalid', lastupdated: '2026-09-05T05:23:00Z' }),
+    sensor({ kerbsideid: 101, status_description: 'Present', status_timestamp: '2026-09-05T05:19:00Z', lastupdated: '2026-09-05T05:18:00Z' }),
+    sensor({ kerbsideid: 102, status_description: 'Unoccupied', status_timestamp: sharedObservation, lastupdated: '2026-09-05T05:20:00Z' }),
+    sensor({ kerbsideid: 102, status_description: 'Present', status_timestamp: sharedObservation, lastupdated: '2026-09-05T05:22:00Z' }),
+    sensor({ kerbsideid: 103, status_description: 'Unoccupied', status_timestamp: sharedObservation, lastupdated: sharedUpdate }),
+    sensor({ kerbsideid: 103, status_description: 'Present', status_timestamp: sharedObservation, lastupdated: sharedUpdate }),
+  ];
+  const bays = [
+    bay({ kerbsideid: 101, location: { lon: 144.951, lat: -37.851 } }),
+    bay({ kerbsideid: 102, location: { lon: 144.952, lat: -37.852 } }),
+    bay({ kerbsideid: 103, location: { lon: 144.953, lat: -37.853 } }),
+  ];
+  const run = (sensorRows, bayRows) => queryMelbourneParkingIndex(
+    buildMelbourneParkingIndex(sensorRows, bayRows), BBOX, { nowMs: NOW, maxFeatures: 10 },
+  );
+
+  const forward = run(sensors, bays);
+  const reverse = run([...sensors].reverse(), [...bays].reverse());
+  assert.deepEqual(reverse, forward, 'duplicate-sensor selection cannot depend on provider order');
+  assert.deepEqual(
+    new Map(forward.features.map(({ geometry, properties }) => [geometry.coordinates.join(','), properties.status])),
+    new Map([
+      ['144.951,-37.851', 'occupied'],
+      ['144.952,-37.852', 'occupied'],
+      ['144.953,-37.853', 'occupied'],
+    ]),
+  );
+});
+
 test('parking freshness is evaluated per sensor observation after five minutes', () => {
   const stale = normalizeMelbourneParking(sensor({ status_timestamp: '2026-09-05T05:18:59Z' }), bay(), { nowMs: NOW });
   const current = normalizeMelbourneParking(sensor({ status_timestamp: '2026-09-05T05:19:00Z' }), bay(), { nowMs: NOW });
