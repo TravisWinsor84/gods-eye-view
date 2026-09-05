@@ -31,6 +31,8 @@ test('registry declares the approved regional source IDs with immutable source c
     'melbourne-parking-live',
     'melbourne-development',
     'melbourne-culture',
+    'au-public-toilets',
+    'vic-transport-stops',
     'ptv-transit',
     'au-hospital-ed-performance',
   ]);
@@ -59,6 +61,13 @@ test('registry declares the approved regional source IDs with immutable source c
   assert.match(REGIONAL_SOURCES['melbourne-drinking-fountains'].refresh, /publisher source cadence is daily/i);
   assert.match(REGIONAL_SOURCES['melbourne-barbecues'].refresh, /three missed publisher cycles/i);
   assert.equal(REGIONAL_SOURCES['melbourne-culture'].geometry, 'point');
+  assert.equal(REGIONAL_SOURCES['au-public-toilets'].endpoint, 'https://data.gov.au/data/api/3/action/package_show?id=553b3049-2b8b-46a2-95e6-640d7986a8c1');
+  assert.equal(REGIONAL_SOURCES['au-public-toilets'].maxFeatures, 1_000);
+  assert.equal(REGIONAL_SOURCES['au-public-toilets'].maxRows, 30_000);
+  assert.match(REGIONAL_SOURCES['au-public-toilets'].licence, /legal review.*conflict/i);
+  assert.equal(REGIONAL_SOURCES['vic-transport-stops'].endpoint, 'https://opendata.transport.vic.gov.au/api/3/action/package_show?id=public-transport-lines-and-stops');
+  assert.equal(REGIONAL_SOURCES['vic-transport-stops'].maxRows, 40_000);
+  assert.match(REGIONAL_SOURCES['vic-transport-stops'].refresh, /reference.*not realtime/i);
   assert.ok(Number.isInteger(REGIONAL_SOURCES['melbourne-trees'].maxFeatures));
 });
 

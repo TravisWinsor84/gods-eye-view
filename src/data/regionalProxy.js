@@ -3,6 +3,7 @@ import { gaArcGisRequests } from './gaRegionalSources.js';
 import { createTransportVicGtfs } from './transportVicGtfs.js';
 import { createMelbourneCivicClient } from './melbourneCivicSources.js';
 import { OGC_MAX_RESPONSE_BYTES, normalizeOgcPayload, ogcFeatureRequest } from './ogcRegionalSources.js';
+import { createIndexedRegionalDownloads, INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS } from './indexedRegionalDownloads.js';
 
 const MAX_CACHE_ENTRIES = 64;
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -20,6 +21,7 @@ const MELBOURNE_CIVIC_SOURCE_IDS = new Set([
   'melbourne-culture',
 ]);
 const OGC_SOURCE_IDS = new Set(['au-dea-hotspots', 'vic-parks', 'vic-recreation-tracks', 'vic-heritage']);
+const INDEXED_SOURCE_IDS = new Set(INDEXED_REGIONAL_DOWNLOAD_SOURCE_IDS);
 const OGC_TIMEOUT_MS = 20_000;
 const MAX_GA_PAGES_PER_LAYER = 2;
 const GA_TIMEOUT_MS = 20_000;
@@ -171,7 +173,7 @@ function unavailableError(error) {
 }
 
 /** Create Vite middleware for the fixed, public regional-source allow-list. */
-export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, melbourneCivicClient, env = process.env } = {}) {
+export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(), timeoutMs, transportVicGtfs, melbourneCivicClient, indexedRegionalDownloads, env = process.env } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   let activeRefreshes = 0;
@@ -199,6 +201,12 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   });
   const civicClient = melbourneCivicClient || createMelbourneCivicClient({
+    fetchImpl,
+    now,
+    withRequestSlot: withProviderRequestSlot,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+  });
+  const indexedClient = indexedRegionalDownloads || createIndexedRegionalDownloads({
     fetchImpl,
     now,
     withRequestSlot: withProviderRequestSlot,
@@ -363,6 +371,29 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
         }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
       }
     }
+    if (INDEXED_SOURCE_IDS.has(sourceId)) {
+      try {
+        const body = await indexedClient.load(sourceId, { bbox, maxFeatures: source.maxFeatures });
+        const sourceStatus = body?.sourceStatus || {};
+        const status = sourceStatus.status === 'stale'
+          ? 'stale'
+          : sourceStatus.status === 'current' ? 'fresh' : 'degraded';
+        const cache = cleanIndexedCacheHeader(sourceStatus.cache);
+        return sendJson(res, 200, body, {
+          'X-Regional-Source': sourceId,
+          'X-Regional-Status': status,
+          ...(cache ? { 'X-Regional-Cache': cache } : {}),
+        });
+      } catch (error) {
+        const timedOut = error?.code === 'TIMEOUT';
+        const invalid = ['SOURCE_LIMIT', 'INVALID_SOURCE_METADATA', 'INVALID_SOURCE_DATA', 'INVALID_SOURCE_QUERY'].includes(error?.code);
+        return sendJson(res, timedOut ? 504 : 502, {
+          error: timedOut
+            ? 'regional source timed out'
+            : invalid ? 'regional source returned invalid data' : 'regional source is temporarily unavailable',
+        }, { 'X-Regional-Source': sourceId, 'X-Regional-Status': 'unavailable' });
+      }
+    }
 
     const key = cacheKey(sourceId, bbox);
     const existing = cache.get(key);
@@ -414,4 +445,9 @@ export function createRegionalProxy({ fetchImpl = fetch, now = () => Date.now(),
       return sendJson(res, unavailableError(error), { error: unavailableError(error) === 504 ? 'regional source timed out' : 'regional source is temporarily unavailable' });
     }
   };
+}
+
+function cleanIndexedCacheHeader(value) {
+  const headers = { hit: 'HIT', miss: 'MISS', stale: 'STALE', revalidated: 'REVALIDATED' };
+  return headers[value] || '';
 }

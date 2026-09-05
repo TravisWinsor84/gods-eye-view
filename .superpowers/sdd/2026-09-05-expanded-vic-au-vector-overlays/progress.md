@@ -269,3 +269,14 @@
   topology budget was 100,000 comparisons; the implementation and exported
   contract use 150,000. Documentation now matches the runtime. Task 4 is
   closed; no push or deployment occurred.
+- Task 5 indexed-download implementation is complete locally. National toilets
+  and Victorian transport stops resolve current official CKAN resources,
+  enforce streamed byte/row/schema limits, build provider-wide spatial indexes,
+  and reuse them across bboxes and conditional 304 revalidation. Focused
+  verification passed 95/95.
+- Live Task 5 smoke indexed 25,560 of 25,563 toilet rows from 12,057,577 bytes
+  and 31,161 of 31,170 transport-stop rows from 8,189,610 bytes. Both viewport
+  queries returned 1,000 deterministic features as partial/capped, and both
+  providers subsequently returned not-modified revalidation semantics. The
+  toilet catalogue/package licence conflict remains explicit and requires
+  legal review. No push or deployment occurred.

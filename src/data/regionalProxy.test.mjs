@@ -33,6 +33,31 @@ function gaPoint(properties, longitude = 144.96, latitude = -37.81) {
   return { type: 'Feature', geometry: { type: 'Point', coordinates: [longitude, latitude] }, properties };
 }
 
+function ckanIndexedFixture(sourceId) {
+  const toilet = sourceId === 'au-public-toilets';
+  const packageId = toilet ? '553b3049-2b8b-46a2-95e6-640d7986a8c1' : '6d36dfd9-8693-4552-8a03-05eb29a391fd';
+  const resourceId = toilet ? '34076296-6692-4e30-b627-67b7c4eb1027' : 'a2cba0b0-bddc-4b87-b495-2b6b7013af6e';
+  const host = toilet ? 'data.gov.au' : 'opendata.transport.vic.gov.au';
+  return {
+    success: true,
+    result: {
+      id: packageId,
+      metadata_modified: '2026-09-05T00:00:00',
+      license_title: toilet ? 'Creative Commons Attribution 3.0 Australia' : 'Creative Commons Attribution 4.0',
+      resources: [{
+        id: resourceId,
+        name: toilet ? 'Toiletmap.csv' : 'Public Transport Stops',
+        format: toilet ? 'CSV' : 'GeoJSON',
+        mimetype: toilet ? 'text/csv' : 'application/geo+json',
+        url: `https://${host}/dataset/${packageId}/resource/${resourceId}/download/${toilet ? 'toilet.csv' : 'public_transport_stops.geojson'}`,
+        size: 1_000,
+        last_modified: '2026-09-05T00:00:00',
+        ...(toilet ? {} : { dataset_last_updated_date: '2025-07-28T00:00:00' }),
+      }],
+    },
+  };
+}
+
 function invokeRegional(middleware, url, { method = 'GET' } = {}) {
   return new Promise((resolve, reject) => {
     const result = { status: 0, headers: {}, body: '' };
@@ -65,6 +90,89 @@ test('regional proxy rejects unknown IDs before fetch', async () => {
   }), `/api/regional/not-a-source${MELBOURNE_BOUNDS}`);
   assert.equal(response.status, 404);
   assert.equal(fetchCalls, 0);
+});
+
+test('regional proxy delegates indexed downloads globally across bboxes and surfaces cache/status metadata', async () => {
+  const calls = [];
+  const middleware = createRegionalProxy({
+    indexedRegionalDownloads: {
+      async load(sourceId, options) {
+        calls.push({ sourceId, ...options });
+        return {
+          type: 'FeatureCollection', features: [],
+          sourceStatus: { status: 'current', cache: calls.length === 1 ? 'miss' : 'hit', downloadStatus: 'downloaded' },
+        };
+      },
+    },
+  });
+
+  const first = await invokeRegional(middleware, `/api/regional/au-public-toilets${MELBOURNE_BOUNDS}`);
+  const second = await invokeRegional(middleware, '/api/regional/au-public-toilets?west=138.4&south=-35.1&east=138.8&north=-34.7');
+  assert.deepEqual(calls, [
+    { sourceId: 'au-public-toilets', bbox: { west: 144.9, south: -37.9, east: 145, north: -37.8 }, maxFeatures: 1_000 },
+    { sourceId: 'au-public-toilets', bbox: { west: 138.4, south: -35.1, east: 138.8, north: -34.7 }, maxFeatures: 1_000 },
+  ]);
+  assert.equal(first.status, 200);
+  assert.equal(first.headers['x-regional-cache'], 'MISS');
+  assert.equal(first.headers['x-regional-status'], 'fresh');
+  assert.equal(second.headers['x-regional-cache'], 'HIT');
+});
+
+test('regional proxy maps indexed partial, stale, limit, invalid and unavailable states honestly', async () => {
+  const states = [
+    [{ sourceStatus: { status: 'partial', cache: 'miss' } }, 200, 'degraded', 'MISS'],
+    [{ sourceStatus: { status: 'stale', cache: 'stale' } }, 200, 'stale', 'STALE'],
+    [Object.assign(new Error('source limit exceeded'), { code: 'SOURCE_LIMIT' }), 502, 'unavailable', undefined],
+    [Object.assign(new Error('invalid source data'), { code: 'INVALID_SOURCE_DATA' }), 502, 'unavailable', undefined],
+    [Object.assign(new Error('private provider detail'), { code: 'UPSTREAM_UNAVAILABLE' }), 502, 'unavailable', undefined],
+  ];
+  for (const [outcome, status, regionalStatus, cache] of states) {
+    const response = await invokeRegional(createRegionalProxy({
+      indexedRegionalDownloads: { async load() {
+        if (outcome instanceof Error) throw outcome;
+        return { type: 'FeatureCollection', features: [], ...outcome };
+      } },
+    }), `/api/regional/vic-transport-stops${MELBOURNE_BOUNDS}`);
+    assert.equal(response.status, status);
+    assert.equal(response.headers['x-regional-status'], regionalStatus);
+    assert.equal(response.headers['x-regional-cache'], cache);
+    if (status !== 200) assert.doesNotMatch(response.body, /private provider detail|source limit exceeded/);
+  }
+});
+
+test('indexed metadata and file bodies share the proxy four-request semaphore', async () => {
+  let active = 0;
+  let maxActive = 0;
+  const metadata = (sourceId) => ckanIndexedFixture(sourceId);
+  const middleware = createRegionalProxy({
+    fetchImpl: async (input) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      const url = String(input);
+      const isMetadata = url.includes('/api/3/action/package_show');
+      const body = isMetadata
+        ? JSON.stringify(metadata(url.includes('553b3049') ? 'au-public-toilets' : 'vic-transport-stops'))
+        : url.includes('toilet')
+          ? '"Name","FacilityType","Latitude","Longitude"\n"Fixture","Park","-37.81","144.96"\n'
+          : JSON.stringify({ type: 'FeatureCollection', features: [] });
+      const contentType = isMetadata ? 'application/json' : url.includes('toilet') ? 'text/csv' : 'application/geo+json';
+      return new Response(new ReadableStream({
+        async start(controller) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          controller.enqueue(new TextEncoder().encode(body));
+          controller.close();
+          active -= 1;
+        },
+      }), { status: 200, headers: { 'Content-Type': contentType } });
+    },
+  });
+  const responses = await Promise.all(Array.from({ length: 6 }, (_, index) => invokeRegional(
+    middleware,
+    `/api/regional/${index % 2 ? 'vic-transport-stops' : 'au-public-toilets'}${MELBOURNE_BOUNDS}`,
+  )));
+  assert.deepEqual(responses.map(({ status }) => status), Array(6).fill(200));
+  assert.ok(maxActive <= 4, `expected at most four active provider bodies, observed ${maxActive}`);
+  assert.equal(active, 0);
 });
 
 test('regional proxy rejects restricted CFA and malformed bounds before fetch', async () => {

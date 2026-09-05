@@ -72,6 +72,8 @@ only after its authenticated contract has been validated.
 | `melbourne-parking-live` | City of Melbourne, [On-street Parking Bay Sensors](https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bay-sensors/information/) joined to [On-street Parking Bays](https://data.melbourne.vic.gov.au/explore/dataset/on-street-parking-bays/information/) through Explore API v2.1 JSON exports | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented provider-wide two-minute cache; bbox filtering follows the server-side join; each observation becomes stale after five minutes; not assigned to a visible category pack until Task 6 |
 | `melbourne-development` | City of Melbourne, [Development Activity Monitor](https://data.melbourne.vic.gov.au/explore/dataset/development-activity-monitor/information/) through Explore API v2.1 | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/) | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented daily viewport cache for a monthly planning/development source; not live works and not assigned to a visible category pack until Task 6 |
 | `melbourne-culture` | City of Melbourne, [Outdoor Artworks](https://data.melbourne.vic.gov.au/explore/dataset/outdoor-artworks/information/) and [Public Memorials and Sculptures](https://data.melbourne.vic.gov.au/explore/dataset/public-memorials-and-sculptures/information/) through Explore API v2.1 | Dataset metadata is [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/); media rights remain record-specific | `City of Melbourne Open Data — licensed under Creative Commons Attribution 4.0 International.` | Point | Implemented daily viewport cache; reference metadata with unspecified inspection cadence; not assigned to a visible category pack until Task 6 |
+| `au-public-toilets` | Australian Government, [National Public Toilet Map CKAN package](https://data.gov.au/data/api/3/action/package_show?id=553b3049-2b8b-46a2-95e6-640d7986a8c1); the current CSV resource is selected from metadata rather than a pinned rotating filename | **Legal review required.** The structured catalogue says Creative Commons Attribution 3.0 Australia, while package notes require prompt updates and describe a non-transferable licence with no sublicensing. These terms conflict, so this project does not overstate redistribution rights. | `National Public Toilet Map, Australian Government` | Point | Implemented provider-wide CSV index. Metadata is revalidated hourly regardless of the provider's 30-day cache header; the file gets a conditional check every six hours, with finite three-day last-good. Reference inventory only, never proof a facility is currently open; no category-pack membership until Task 6. |
+| `vic-transport-stops` | Department of Transport and Planning Victoria, [Public Transport Lines and Stops CKAN package](https://opendata.transport.vic.gov.au/api/3/action/package_show?id=public-transport-lines-and-stops); the exact stops GeoJSON resource is selected from package metadata | [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/) | `Source: Department of Transport and Planning Victoria, Public Transport Lines and Stops, licensed under Creative Commons Attribution 4.0.` | Point | Implemented provider-wide GeoJSON index. Metadata is revalidated hourly and the file conditionally checked daily, with finite seven-day last-good. Package/resource dates remain separate. Reference inventory only, never realtime or evidence that a service is running; interstate coach endpoints remain valid; no category-pack membership until Task 6. |
 | `ptv-transit` | Public Transport Victoria, [Transport Victoria Open Data Portal GTFS Realtime](https://opendata.transport.vic.gov.au/dataset/gtfs-realtime) | [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/); one Open Data Portal key is required server-side | `Source: Licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.` | Point (vehicle positions) | Metro, tram, bus and V/Line provider snapshots cached globally by mode for at least 30 seconds; bbox filtering occurs after decode |
 | `au-hospital-ed-performance` | Australian Institute of Health and Welfare, [MyHospitals API](https://www.aihw.gov.au/hospitals/other-resources/myhospitals-api) | [CC BY 4.0](https://www.aihw.gov.au/copyright); no credentials | `Based on Australian Institute of Health and Welfare material.` | Point (hospital reporting units) | 24-hour application cache; release-cycle historical data |
 
@@ -159,6 +161,39 @@ misleading, so the UI must never promise availability or legality and users
 must check current street signs. Missing geometry, table or dataset failures,
 byte or row caps, and retained last-good tables are surfaced as partial, stale
 or unavailable status rather than silently presented as complete.
+
+The two indexed-download sources resolve the current resource through a fixed
+official CKAN `package_show` URL before file revalidation. Metadata must be JSON
+and the selected resource must have the exact expected name, format and media
+type, a UUID resource ID, an HTTPS URL on the source's fixed host, a matching
+package/resource path and a declared size under the source cap. Redirects are
+rejected. Download validators are opaque and URL-scoped: ETag and Last-Modified
+are sent only while the resource ID and URL remain unchanged, so a rotated
+resource or filename cannot inherit old validators. A 304 reuses the bounded
+parsed index and updates its validation state.
+
+File bodies are consumed while holding the shared four-request provider
+semaphore. Declared compressed length and streamed decoded bytes are bounded;
+CSV rows and GeoJSON features have separate hard caps. The National Public
+Toilet Map uses a maintained quote-aware CSV parser, finite string coordinates
+and strict `True`/`False` flags. It emits only bounded name, facility type,
+accessibility, payment and descriptive opening-hours text. Addresses, provider
+keys, URLs, notes and other free text are omitted. Opening-hours text always
+states that it is not proof the facility is currently open, and no row-level
+currency or update date is invented.
+
+Transport stops accept only finite WGS84 Point features and expose bounded stop
+name and mode plus a reference-only caveat. `STOP_ID` remains an opaque source
+string used neither as a public ID nor as a sole deduplication key; duplicate
+IDs and interstate coach endpoints are retained when their public projections
+differ. No stop claims realtime state, service operation or a per-feature date.
+For both sources, normalized public properties and coordinates determine stable
+public IDs and deterministic cap order. Exact duplicate public projections are
+removed, digest collisions receive stable ordinals, and bbox queries reuse one
+process-global bucket index rather than refetching by viewport. Responses
+distinguish current, partial and finite stale last-good state and surface the
+package metadata date, resource modified date and, where provided, the distinct
+dataset-last-updated date.
 
 `vic-epa-air` is deliberately fail-closed. The previously recorded URL was an
 information page, not a supported API endpoint, and the guessed gateway route
